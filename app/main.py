@@ -8,6 +8,7 @@ from .rules_engine import get_legal_players
 from .optimizer import best_first_declaration, best_response, apply_matchup
 from .explanation import enrich_recommendations
 from .models import Team, Player
+from .lineup_tracker import get_lineup_statuses
 from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -294,3 +295,40 @@ def apply_matchup_endpoint(body: dict):
     )
     
     return {"state": next_state.model_dump()}
+
+# ============ LINEUP TRACKER ENDPOINT ============
+
+@app.post("/lineup-status")
+def lineup_status_endpoint(request: dict):
+    """
+    Get lineup statuses for a team based on used players.
+    
+    Request body:
+    {
+        "team": Team,
+        "used_player_ids": ["p1", "p2", ...]
+    }
+    
+    Response:
+    {
+        "active_lineups": [
+            {
+                "player_ids": [...],
+                "skill_levels": [6,5,4,4,3],
+                "label": "6,5,4,4,3",
+                "most_likely": true/false
+            }
+        ],
+        "eliminated_lineups": [...]
+    }
+    """
+    team_data = request.get("team")
+    used_player_ids = request.get("used_player_ids", [])
+    
+    if not team_data:
+        return {"error": "Team data is required"}
+    
+    team = Team(**team_data)
+    statuses = get_lineup_statuses(team, used_player_ids)
+    
+    return statuses

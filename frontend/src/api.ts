@@ -106,3 +106,30 @@ export async function createMatch(ourTeamId: string, oppTeamId: string, declarer
     }),
   });
 }
+
+// ============ LINEUP TRACKER ============
+
+export interface Lineup {
+  player_ids: string[];
+  skill_levels: number[];
+  label: string;
+  total_skill?: number;
+  combined_win_rate?: number;
+  most_likely: boolean;
+  count?: number;  // number of real player lineups with this skill pattern
+}
+
+export interface LineupStatusResponse {
+  active_lineups: Lineup[];
+  eliminated_lineups: Lineup[];
+}
+
+export async function getLineupStatus(team: any, usedPlayerIds: string[]): Promise<LineupStatusResponse> {
+  return fetchJson(`${API_BASE}/lineup-status`, {
+    method: "POST",
+    body: JSON.stringify({
+      team,
+      used_player_ids: usedPlayerIds,
+    }),
+  });
+}
