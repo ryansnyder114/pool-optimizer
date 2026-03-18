@@ -1,30 +1,32 @@
 # Project State
 
 ## ✅ Working
-- Frontend React dashboard running (port 3000)
-- Backend FastAPI running (port 8000)
-- CORS fixed
-- Teams can be created and saved
-- Teams load correctly
-- Match creation working
-- Player input + labels fixed
+- Team creation + saving works
+- Match creation works
+- Best response / matchup flow works
+- Player input UX fixed
+- Lineup tracker implemented
+  - Real player-based lineups
+  - Aggregated by skill pattern
+  - Eliminates impossible lineups
+  - Updates after each round
+  - Highlights most likely lineup
 
-## ⚠️ Known Issues / Improvements
-- Add both team lineup options, activly recalculate
+## ⚠️ In Progress / Improvements
+- Improve lineup UI readability
+- Add lineup pressure indicator
 - Improve recommendation display
-- Add match progress tracking
 
-
-## 🎯 Next Steps
-1. Add function for both tean lineups
-2. Format recommendation UI
-3. 
+## 🎯 Next Goals
+1. Improve lineup tracker UI (sorting, counts, pressure)
+2. Add Captain Mode panel
+3. Improve recommendation cards
 
 ## 🧱 Tech Stack
-- Frontend: React (TypeScript)
-- Backend: FastAPI (Python)
+- Frontend: React + TypeScript
+- Backend: FastAPI
 - Data: JSON storage
 
 ## 📝 Notes
-- API base: http://127.0.0.1:8000
+- API: http://127.0.0.1:8000
 - Project path: /Users/henrybot/.openclaw/workspace/pool_optimizer
