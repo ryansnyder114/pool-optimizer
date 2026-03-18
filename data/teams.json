@@ -1,0 +1,98 @@
+{
+  "team1": {
+    "id": "team1",
+    "name": "Cue Ballers",
+    "players": [
+      {
+        "id": "p1",
+        "name": "Ryan",
+        "skill_level": 6,
+        "recent_win_rate": 0.68
+      },
+      {
+        "id": "p2",
+        "name": "Mike",
+        "skill_level": 5,
+        "recent_win_rate": 0.58
+      },
+      {
+        "id": "p3",
+        "name": "Jake",
+        "skill_level": 5,
+        "recent_win_rate": 0.52
+      },
+      {
+        "id": "p4",
+        "name": "Chris",
+        "skill_level": 4,
+        "recent_win_rate": 0.48
+      },
+      {
+        "id": "p5",
+        "name": "Tom",
+        "skill_level": 3,
+        "recent_win_rate": 0.42
+      },
+      {
+        "id": "p6",
+        "name": "Dan",
+        "skill_level": 3,
+        "recent_win_rate": 0.38
+      },
+      {
+        "id": "p7",
+        "name": "Nick",
+        "skill_level": 2,
+        "recent_win_rate": 0.35
+      }
+    ]
+  },
+  "team2": {
+    "id": "team2",
+    "name": "Rack Attack",
+    "players": [
+      {
+        "id": "o1",
+        "name": "Alex",
+        "skill_level": 6,
+        "recent_win_rate": 0.65
+      },
+      {
+        "id": "o2",
+        "name": "Sam",
+        "skill_level": 5,
+        "recent_win_rate": 0.55
+      },
+      {
+        "id": "o3",
+        "name": "Joe",
+        "skill_level": 5,
+        "recent_win_rate": 0.5
+      },
+      {
+        "id": "o4",
+        "name": "Max",
+        "skill_level": 4,
+        "recent_win_rate": 0.45
+      },
+      {
+        "id": "o5",
+        "name": "Dan",
+        "skill_level": 4,
+        "recent_win_rate": 0.4
+      },
+      {
+        "id": "o6",
+        "name": "Evan",
+        "skill_level": 3,
+        "recent_win_rate": 0.38
+      },
+      {
+        "id": "o7",
+        "name": "Greg",
+        "skill_level": 2,
+        "recent_win_rate": 0.32
+      }
+    ]
+  }
+}
