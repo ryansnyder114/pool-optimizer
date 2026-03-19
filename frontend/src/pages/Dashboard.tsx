@@ -802,6 +802,11 @@ export default function Dashboard() {
   const [showRoundForm, setShowRoundForm] = useState(false);
   const [editingRound, setEditingRound] = useState<Round | null>(null);
 
+  // Round declaration flow state
+  const [startingDeclaringTeam, setStartingDeclaringTeam] = useState<"teamA" | "teamB">("teamA");
+  const [declarationStep, setDeclarationStep] = useState<"first" | "response" | "complete">("first");
+  const [firstDeclaredPlayer, setFirstDeclaredPlayer] = useState<{ id: string; name: string; team: "teamA" | "teamB" } | null>(null);
+
   const [selectedOurPlayerId, setSelectedOurPlayerId] = useState("");
   const [selectedOppPlayerId, setSelectedOppPlayerId] = useState("");
 
@@ -822,6 +827,14 @@ export default function Dashboard() {
   const nextRound = scoreState.rounds.length + 1;
   const usedAPlayerIds = scoreState.rounds.map(r => r.teamAPlayerId);
   const usedBPlayerIds = scoreState.rounds.map(r => r.teamBPlayerId);
+
+  // Derive which team declares first based on round number and starting team
+  const currentRoundDeclaringTeam: "teamA" | "teamB" = 
+    (nextRound % 2 === 1) === (startingDeclaringTeam === "teamA") ? "teamA" : "teamB";
+  
+  const isOurTeam = matchState?.our_team.id ? true : false; // simplified - our team is teamA in this UI
+  const declaringTeamName = currentRoundDeclaringTeam === "teamA" ? matchState?.our_team.name || "Team A" : matchState?.opp_team.name || "Team B";
+  const respondingTeamName = currentRoundDeclaringTeam === "teamA" ? matchState?.opp_team.name || "Team B" : matchState?.our_team.name || "Team A";
 
   // Handle save round (add or update)
   const handleSaveRound = (round: Round) => {
@@ -1068,6 +1081,9 @@ export default function Dashboard() {
       setBestResponseRecs([]);
       setSelectedOurPlayerId("");
       setSelectedOppPlayerId("");
+      // Reset declaration flow for new match
+      setDeclarationStep("first");
+      setFirstDeclaredPlayer(null);
       await refreshLegalPlayers(state);
       await refreshLineupStatuses(state);
       setStatus("Match created.");
@@ -1135,6 +1151,9 @@ export default function Dashboard() {
       setSelectedOppPlayerId("");
       setBestFirstRecs([]);
       setBestResponseRecs([]);
+      // Reset declaration flow for next round
+      setDeclarationStep("first");
+      setFirstDeclaredPlayer(null);
       await refreshLegalPlayers(nextState);
       await refreshLineupStatuses(nextState);
       setStatus(nextState.round_index > 5 ? "Match complete." : "Matchup locked.");
@@ -1144,6 +1163,33 @@ export default function Dashboard() {
       setBusy(false);
     }
   }
+
+  // Confirm first declaration and advance to response step
+  const handleConfirmFirstDeclaration = () => {
+    if (declarationStep !== "first") return;
+    
+    // Determine which player was selected based on who's declaring
+    const declaringIsTeamA = currentRoundDeclaringTeam === "teamA";
+    const selectedPlayerId = declaringIsTeamA ? selectedOurPlayerId : selectedOppPlayerId;
+    const declaringTeam = matchState?.our_team.name || "Team A";
+    const player = declaringIsTeamA 
+      ? matchState?.our_team.players.find(p => p.id === selectedPlayerId)
+      : matchState?.opp_team.players.find(p => p.id === selectedPlayerId);
+    
+    if (!player) {
+      setStatus("Select a player first");
+      return;
+    }
+    
+    // Store the first declared player and advance to response
+    setFirstDeclaredPlayer({
+      id: player.id,
+      name: player.name,
+      team: currentRoundDeclaringTeam
+    });
+    setDeclarationStep("response");
+    setStatus(`${declaringTeam} declared ${player.name} — waiting for response`);
+  };
 
   const ourLegalIds = new Set(ourLegalPlayers.map((p) => p.id));
   const oppLegalIds = new Set(oppLegalPlayers.map((p) => p.id));
@@ -1387,7 +1433,7 @@ export default function Dashboard() {
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: "1fr 1fr 1.5fr auto auto",
+            gridTemplateColumns: "1fr 1fr 1fr 1fr auto auto",
             gap: 12,
             alignItems: "end",
           }}
@@ -1438,6 +1484,18 @@ export default function Dashboard() {
             </select>
           </label>
 
+          <label>
+            Round 1 Starts With
+            <select
+              style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
+              value={startingDeclaringTeam}
+              onChange={(e) => setStartingDeclaringTeam(e.target.value as "teamA" | "teamB")}
+            >
+              <option value="teamA">Our Team</option>
+              <option value="teamB">Opponent</option>
+            </select>
+          </label>
+
           <button onClick={handleCreateMatch} disabled={busy}>
             Start Matchup
           </button>
@@ -1475,6 +1533,39 @@ export default function Dashboard() {
               </div>
               <div>
                 <strong>Status:</strong> {matchComplete ? "Match Complete" : "In Progress"}
+              </div>
+            </div>
+            
+            {/* Round Turn Banner */}
+            <div style={{ 
+              marginTop: 16, 
+              padding: "12px 16px", 
+              borderRadius: 8,
+              background: currentRoundDeclaringTeam === "teamA" ? "#dbeafe" : "#fce7f3",
+              border: `2px solid ${currentRoundDeclaringTeam === "teamA" ? "#3b82f6" : "#ec4899"}`,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between"
+            }}>
+              <div style={{ fontSize: 15, fontWeight: 600, color: "#1f2937" }}>
+                {declarationStep === "first" ? (
+                  <>🏓 Round {nextRound} — <strong>{declaringTeamName}</strong> puts up first</>
+                ) : firstDeclaredPlayer ? (
+                  <>🎯 <strong>{firstDeclaredPlayer.name}</strong> declared ({firstDeclaredPlayer.team === "teamA" ? matchState?.our_team.name : matchState?.opp_team.name}) — <strong>{respondingTeamName}</strong> respond!</>
+                ) : (
+                  <>🏓 Round {nextRound} — Waiting for response</>
+                )}
+              </div>
+              <div style={{ 
+                padding: "4px 10px", 
+                borderRadius: 4, 
+                fontSize: 12, 
+                fontWeight: 700,
+                background: declarationStep === "first" ? "#f59e0b" : "#10b981",
+                color: "#fff"
+              }}>
+                {declarationStep === "first" ? "WAITING FOR FIRST DECLARATION" : 
+                 declarationStep === "response" ? "WAITING FOR RESPONSE" : "ROUND COMPLETE"}
               </div>
             </div>
           </section>
@@ -1572,10 +1663,25 @@ export default function Dashboard() {
                 padding: 16,
               }}
             >
-              <h3>{matchState.our_team.name}</h3>
+              <h3>
+                {matchState.our_team.name}
+                {declarationStep === "first" && currentRoundDeclaringTeam !== "teamA" && (
+                  <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400, marginLeft: 8 }}>
+                    — waiting for their turn
+                  </span>
+                )}
+                {declarationStep === "response" && currentRoundDeclaringTeam === "teamA" && (
+                  <span style={{ fontSize: 12, color: "#10b981", fontWeight: 600, marginLeft: 8 }}>
+                    — respond now!
+                  </span>
+                )}
+              </h3>
               {matchState.our_team.players.map((p) => {
                 const used = matchState.our_used_player_ids.includes(p.id);
                 const legal = ourLegalIds.has(p.id);
+                const isMyTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamA") ||
+                                 (declarationStep === "response" && currentRoundDeclaringTeam !== "teamA");
+                const isDisabled = !isMyTurn || used;
 
                 return (
                   <div
@@ -1587,16 +1693,17 @@ export default function Dashboard() {
                       border:
                         selectedOurPlayerId === p.id
                           ? "2px solid #2563eb"
-                          : "1px solid #ddd",
-                      background: used ? "#f3f4f6" : legal ? "#ecfdf5" : "#fff7ed",
-                      cursor: used ? "not-allowed" : "pointer",
+                          : isDisabled ? "1px solid #e5e7eb" : "1px solid #ddd",
+                      background: used ? "#f3f4f6" : isDisabled ? "#f9fafb" : legal ? "#ecfdf5" : "#fff7ed",
+                      cursor: isDisabled ? "not-allowed" : "pointer",
+                      opacity: isDisabled ? 0.6 : 1,
                     }}
                     onClick={() => {
-                      if (!used) setSelectedOurPlayerId(p.id);
+                      if (!isDisabled) setSelectedOurPlayerId(p.id);
                     }}
                   >
                     <strong>{p.name}</strong> (SL {p.skill_level}){" "}
-                    {used ? "— Used" : legal ? "— Legal" : "— Unavailable"}
+                    {used ? "— Used" : !isMyTurn ? "— Not your turn" : legal ? "— Legal" : "— Unavailable"}
                     <div style={{ fontSize: 13, color: "#555" }}>
                       Win Rate: {((p.recent_win_rate ?? 0.5) * 100).toFixed(0)}%
                     </div>
@@ -1612,10 +1719,25 @@ export default function Dashboard() {
                 padding: 16,
               }}
             >
-              <h3>{matchState.opp_team.name}</h3>
+              <h3>
+                {matchState.opp_team.name}
+                {declarationStep === "first" && currentRoundDeclaringTeam !== "teamB" && (
+                  <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400, marginLeft: 8 }}>
+                    — waiting for their turn
+                  </span>
+                )}
+                {declarationStep === "response" && currentRoundDeclaringTeam === "teamB" && (
+                  <span style={{ fontSize: 12, color: "#10b981", fontWeight: 600, marginLeft: 8 }}>
+                    — respond now!
+                  </span>
+                )}
+              </h3>
               {matchState.opp_team.players.map((p) => {
                 const used = matchState.opp_used_player_ids.includes(p.id);
                 const legal = oppLegalIds.has(p.id);
+                const isMyTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamB") ||
+                                 (declarationStep === "response" && currentRoundDeclaringTeam !== "teamB");
+                const isDisabled = !isMyTurn || used;
 
                 return (
                   <div
@@ -1627,16 +1749,17 @@ export default function Dashboard() {
                       border:
                         selectedOppPlayerId === p.id
                           ? "2px solid #dc2626"
-                          : "1px solid #ddd",
-                      background: used ? "#f3f4f6" : legal ? "#ecfdf5" : "#fff7ed",
-                      cursor: used ? "not-allowed" : "pointer",
+                          : isDisabled ? "1px solid #e5e7eb" : "1px solid #ddd",
+                      background: used ? "#f3f4f6" : isDisabled ? "#f9fafb" : legal ? "#ecfdf5" : "#fff7ed",
+                      cursor: isDisabled ? "not-allowed" : "pointer",
+                      opacity: isDisabled ? 0.6 : 1,
                     }}
                     onClick={() => {
-                      if (!used) setSelectedOppPlayerId(p.id);
+                      if (!isDisabled) setSelectedOppPlayerId(p.id);
                     }}
                   >
                     <strong>{p.name}</strong> (SL {p.skill_level}){" "}
-                    {used ? "— Used" : legal ? "— Legal" : "— Unavailable"}
+                    {used ? "— Used" : !isMyTurn ? "— Not your turn" : legal ? "— Legal" : "— Unavailable"}
                     <div style={{ fontSize: 13, color: "#555" }}>
                       Win Rate: {((p.recent_win_rate ?? 0.5) * 100).toFixed(0)}%
                     </div>
@@ -1658,15 +1781,36 @@ export default function Dashboard() {
               >
                 <h3>Actions</h3>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  <button onClick={handleBestFirst} disabled={busy}>
-                    Recommend Our First Player
+                  <button 
+                    onClick={handleBestFirst} 
+                    disabled={busy || declarationStep !== "first"}
+                    title={declarationStep !== "first" ? "Waiting for first declaration" : ""}
+                  >
+                    {currentRoundDeclaringTeam === "teamA" ? "Recommend Our First" : "Recommend Opp First"}
                   </button>
                   <button
                     onClick={handleBestResponse}
-                    disabled={busy || !selectedOppPlayerId}
+                    disabled={busy || declarationStep !== "response" || !selectedOurPlayerId}
+                    title={declarationStep === "first" ? "Wait for first declaration first" : ""}
                   >
-                    Recommend Best Response
+                    {currentRoundDeclaringTeam === "teamA" ? "Recommend Our Response" : "Recommend Opp Response"}
                   </button>
+                  
+                  {/* Confirm First Declaration Button */}
+                  {declarationStep === "first" && (
+                    <button
+                      onClick={handleConfirmFirstDeclaration}
+                      disabled={busy || !(currentRoundDeclaringTeam === "teamA" ? selectedOurPlayerId : selectedOppPlayerId)}
+                      style={{
+                        background: "#7c3aed",
+                        color: "#fff",
+                        border: "none",
+                      }}
+                    >
+                      Confirm First Declaration
+                    </button>
+                  )}
+                  
                   <button
                     onClick={handleLockMatchup}
                     disabled={busy || !selectedOurPlayerId || !selectedOppPlayerId}
@@ -1687,7 +1831,7 @@ export default function Dashboard() {
                 </div>
               </section>
 
-              {bestFirstRecs.length > 0 && (
+              {declarationStep === "first" && bestFirstRecs.length > 0 && (
                 <section
                   style={{
                     border: "1px solid #ddd",
@@ -1696,7 +1840,7 @@ export default function Dashboard() {
                     marginBottom: 24,
                   }}
                 >
-                  <h3>Best First Declaration</h3>
+                  <h3>Recommended First Player — {declaringTeamName}</h3>
                   <div style={{ 
                     marginBottom: 12, 
                     padding: "8px 12px", 
@@ -1794,7 +1938,7 @@ export default function Dashboard() {
                 </section>
               )}
 
-              {bestResponseRecs.length > 0 && (
+              {declarationStep === "response" && bestResponseRecs.length > 0 && (
                 <section
                   style={{
                     border: "1px solid #ddd",
@@ -1803,7 +1947,7 @@ export default function Dashboard() {
                     marginBottom: 24,
                   }}
                 >
-                  <h3>Best Response</h3>
+                  <h3>Recommended Response — {respondingTeamName}</h3>
                   <div style={{ 
                     marginBottom: 12, 
                     padding: "8px 12px", 
