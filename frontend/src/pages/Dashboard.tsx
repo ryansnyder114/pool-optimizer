@@ -88,6 +88,675 @@ function findPlayer(team: Team | undefined, playerId: string): Player | undefine
   return team?.players.find((p) => p.id === playerId);
 }
 
+// ============ SCORE TRACKING TYPES ============
+
+const RACE_TO = 8;
+
+type Round = {
+  round: number;
+  teamAPlayerId: string;
+  teamBPlayerId: string;
+  teamAPlayerName: string;
+  teamBPlayerName: string;
+  teamASkillLevel: number;
+  teamBSkillLevel: number;
+  winner: "teamA" | "teamB";
+  teamAPoints: number;
+  teamBPoints: number;
+};
+
+type MatchStatus = "in_progress" | "clinched" | "complete";
+
+type ScoreState = {
+  raceTo: number;
+  rounds: Round[];
+  teamAScore: number;
+  teamBScore: number;
+  status: MatchStatus;
+};
+
+// Helper to compute score context
+type ScoreContext = "neutral" | "protect_lead" | "trailing" | "desperation";
+
+function computeScoreContext(myScore: number, oppScore: number, raceTo: number): ScoreContext {
+  const diff = myScore - oppScore;
+  const oppNeeds = raceTo - oppScore;
+  
+  if (oppNeeds <= 0) return "desperation";
+  if (diff <= 1) return "neutral";
+  if (diff >= 2 && diff <= 3) return "protect_lead";
+  if (diff >= 4) return "protect_lead";
+  return "trailing";
+}
+
+function getScoreContextLabel(context: ScoreContext, isTeamA: boolean): string {
+  const team = isTeamA ? "Team A" : "Team B";
+  switch (context) {
+    case "neutral": return `${team} - neutral game`;
+    case "protect_lead": return `${team} protecting lead`;
+    case "trailing": return `${team} in catch-up mode`;
+    case "desperation": return `${team} - desperation!`;
+  }
+}
+
+// Score-aware recommendation guidance
+function getScoreContextGuidance(context: ScoreContext): string {
+  switch (context) {
+    case "neutral": return "Close match — standard matchup strategy applies.";
+    case "protect_lead": return "Protecting a lead — prioritize safer matchups and preserve lineup flexibility.";
+    case "trailing": return "Trailing — consider stronger immediate win chances, even if flexibility narrows.";
+    case "desperation": return "High-pressure spot — prioritize highest immediate win probability.";
+  }
+}
+
+// Score-aware explanation for why a recommendation was made
+function getScoreContextReasoning(context: ScoreContext, recommendationType: "first" | "response"): string {
+  switch (context) {
+    case "neutral": 
+      return recommendationType === "first" 
+        ? "Standard strategy for a close match." 
+        : "Standard response strategy for a close match.";
+    case "protect_lead": 
+      return recommendationType === "first"
+        ? "Because you are ahead, this recommendation favors safer lineup preservation."
+        : "Because you are ahead, this recommendation favors preserving lineup flexibility.";
+    case "trailing": 
+      return recommendationType === "first"
+        ? "Because you are trailing, this recommendation favors immediate win potential."
+        : "Because you are trailing, this recommendation prioritizes matching up strongly.";
+    case "desperation": 
+      return recommendationType === "first"
+        ? "Because you're in a high-pressure situation, this recommendation prioritizes the highest immediate win probability."
+        : "Because you're in a high-pressure situation, this recommendation prioritizes the strongest immediate response.";
+  }
+}
+
+// Badge color for score context
+function getScoreContextBadgeStyle(context: ScoreContext): { bg: string; color: string; border: string } {
+  switch (context) {
+    case "neutral": return { bg: "#f3f4f6", color: "#374151", border: "#d1d5db" };
+    case "protect_lead": return { bg: "#d1fae5", color: "#065f46", border: "#10b981" };
+    case "trailing": return { bg: "#fef3c7", color: "#92400e", border: "#f59e0b" };
+    case "desperation": return { bg: "#fee2e2", color: "#991b1b", border: "#dc2626" };
+  }
+}
+
+// ============ SCORE PANEL COMPONENT ============
+
+type ScorePanelProps = {
+  teamAName: string;
+  teamBName: string;
+  teamAScore: number;
+  teamBScore: number;
+  raceTo: number;
+  status: MatchStatus;
+  teamAContext: ScoreContext;
+  teamBContext: ScoreContext;
+};
+
+function ScorePanel({ teamAName, teamBName, teamAScore, teamBScore, raceTo, status, teamAContext, teamBContext }: ScorePanelProps) {
+  const teamANeeds = raceTo - teamAScore;
+  const teamBNeeds = raceTo - teamBScore;
+  const isClinched = status === "clinched";
+  const isComplete = status === "complete";
+  
+  return (
+    <div
+      style={{
+        border: isClinched ? "2px solid #10b981" : isComplete ? "2px solid #6b7280" : "1px solid #ddd",
+        borderRadius: 8,
+        padding: 16,
+        background: isClinched ? "#ecfdf5" : isComplete ? "#f3f4f6" : "#fff",
+        marginBottom: 24,
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+        <h3 style={{ margin: 0 }}>🏆 Live Score</h3>
+        <span style={{
+          padding: "4px 10px",
+          borderRadius: 4,
+          fontSize: 12,
+          fontWeight: 600,
+          background: isClinched ? "#10b981" : isComplete ? "#6b7280" : "#3b82f6",
+          color: "#fff",
+        }}>
+          {isClinched ? "MATCH CLINCHED" : isComplete ? "COMPLETE" : "IN PROGRESS"}
+        </span>
+      </div>
+      
+      <div style={{ display: "flex", gap: 24, alignItems: "center", marginBottom: 12 }}>
+        {/* Team A Score */}
+        <div style={{ textAlign: "center", flex: 1 }}>
+          <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 4 }}>{teamAName}</div>
+          <div style={{ fontSize: 36, fontWeight: 800, color: "#1f2937" }}>{teamAScore}</div>
+          <div style={{ fontSize: 12, color: teamANeeds <= 2 ? "#dc2626" : "#6b7280" }}>
+            needs {teamANeeds}
+          </div>
+        </div>
+        
+        <div style={{ fontSize: 20, color: "#9ca3af", fontWeight: 700 }}>:</div>
+        
+        {/* Team B Score */}
+        <div style={{ textAlign: "center", flex: 1 }}>
+          <div style={{ fontSize: 13, color: "#6b7280", marginBottom: 4 }}>{teamBName}</div>
+          <div style={{ fontSize: 36, fontWeight: 800, color: "#1f2937" }}>{teamBScore}</div>
+          <div style={{ fontSize: 12, color: teamBNeeds <= 2 ? "#dc2626" : "#6b7280" }}>
+            needs {teamBNeeds}
+          </div>
+        </div>
+      </div>
+      
+      <div style={{ textAlign: "center", fontSize: 12, color: "#6b7280", borderTop: "1px solid #e5e7eb", paddingTop: 12 }}>
+        Race to {raceTo} • {getScoreContextLabel(teamAContext, true)} • {getScoreContextLabel(teamBContext, false)}
+      </div>
+    </div>
+  );
+}
+
+// ============ ROUND HISTORY COMPONENT ============
+
+type RoundHistoryProps = {
+  rounds: Round[];
+  teamAName: string;
+  teamBName: string;
+  onEditRound: (round: Round) => void;
+  onDeleteRound: (roundNum: number) => void;
+};
+
+function RoundHistory({ rounds, teamAName, teamBName, onEditRound, onDeleteRound }: RoundHistoryProps) {
+  if (rounds.length === 0) {
+    return (
+      <div style={{ padding: 16, textAlign: "center", color: "#6b7280", fontSize: 13 }}>
+        No rounds completed yet
+      </div>
+    );
+  }
+  
+  return (
+    <div style={{ fontSize: 13 }}>
+      {rounds.map((round) => (
+        <div
+          key={round.round}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: "10px 12px",
+            marginBottom: 6,
+            borderRadius: 6,
+            background: "#f9fafb",
+            border: "1px solid #e5e7eb",
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 600, marginBottom: 4 }}>
+              Round {round.round}
+            </div>
+            <div style={{ color: "#4b5563" }}>
+              {round.teamAPlayerName} (SL{round.teamASkillLevel}) vs {round.teamBPlayerName} (SL{round.teamBSkillLevel})
+            </div>
+            <div style={{ 
+              marginTop: 4, 
+              fontWeight: 700,
+              color: round.winner === "teamA" ? "#10b981" : round.winner === "teamB" ? "#dc2626" : "#6b7280"
+            }}>
+              {round.winner === "teamA" ? `${teamAName} wins` : `${teamBName} wins`}
+              {" • "}
+              <span style={{ color: "#1f2937" }}>
+                {round.teamAPoints} - {round.teamBPoints}
+              </span>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button 
+              onClick={() => onEditRound(round)}
+              style={{ padding: "4px 8px", fontSize: 11 }}
+            >
+              Edit
+            </button>
+            <button 
+              onClick={() => onDeleteRound(round.round)}
+              style={{ padding: "4px 8px", fontSize: 11, background: "#fee2e2", color: "#991b1b" }}
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ============ ROUND ENTRY FORM COMPONENT ============
+
+type RoundEntryFormProps = {
+  nextRound: number;
+  teamAName: string;
+  teamBName: string;
+  teamAPlayers: Player[];
+  teamBPlayers: Player[];
+  usedAPlayerIds: string[];
+  usedBPlayerIds: string[];
+  editingRound?: Round | null;
+  onSave: (round: Round) => void;
+  onCancel: () => void;
+};
+
+function RoundEntryForm({ 
+  nextRound, 
+  teamAName, 
+  teamBName, 
+  teamAPlayers, 
+  teamBPlayers,
+  usedAPlayerIds, 
+  usedBPlayerIds,
+  editingRound,
+  onSave, 
+  onCancel 
+}: RoundEntryFormProps) {
+  const availableAPlayers = teamAPlayers.filter(p => !usedAPlayerIds.includes(p.id) || editingRound?.teamAPlayerId === p.id);
+  const availableBPlayers = teamBPlayers.filter(p => !usedBPlayerIds.includes(p.id) || editingRound?.teamBPlayerId === p.id);
+  
+  const [teamAPlayerId, setTeamAPlayerId] = useState(editingRound?.teamAPlayerId || "");
+  const [teamBPlayerId, setTeamBPlayerId] = useState(editingRound?.teamBPlayerId || "");
+  const [teamAPoints, setTeamAPoints] = useState(editingRound?.teamAPoints ?? 2);
+  const [teamBPoints, setTeamBPoints] = useState(editingRound?.teamBPoints ?? 0);
+  
+  // Derive winner from points
+  const winner: "teamA" | "teamB" = teamAPoints > teamBPoints ? "teamA" : "teamB";
+  
+  const teamAPlayer = teamAPlayers.find(p => p.id === teamAPlayerId);
+  const teamBPlayer = teamBPlayers.find(p => p.id === teamBPlayerId);
+  
+  // Validation: check for tied scores
+  const isTied = teamAPoints === teamBPoints;
+  const pointsValid = teamAPoints >= 0 && teamBPoints >= 0 && teamAPoints <= 3 && teamBPoints <= 3;
+  
+  const scoreError = !pointsValid ? "Points must be 0-3" :
+    isTied ? "Scores cannot be tied - must have a winner" :
+    "";
+  
+  const isValid = teamAPlayerId && teamBPlayerId && pointsValid && !isTied;
+  
+  const handleSave = () => {
+    if (!teamAPlayer || !teamBPlayer) return;
+    
+    const round: Round = {
+      round: editingRound?.round ?? nextRound,
+      teamAPlayerId,
+      teamBPlayerId,
+      teamAPlayerName: teamAPlayer.name,
+      teamBPlayerName: teamBPlayer.name,
+      teamASkillLevel: teamAPlayer.skill_level,
+      teamBSkillLevel: teamBPlayer.skill_level,
+      winner,
+      teamAPoints,
+      teamBPoints,
+    };
+    
+    onSave(round);
+  };
+  
+  return (
+    <div
+      style={{
+        border: "1px solid #3b82f6",
+        borderRadius: 8,
+        padding: 16,
+        background: "#eff6ff",
+        marginBottom: 16,
+      }}
+    >
+      <h4 style={{ margin: "0 0 12px 0", color: "#1e40af" }}>
+        {editingRound ? `Edit Round ${editingRound.round}` : `Add Round ${nextRound}`}
+      </h4>
+      
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+            {teamAName} Player
+          </label>
+          <select
+            value={teamAPlayerId}
+            onChange={(e) => setTeamAPlayerId(e.target.value)}
+            style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #d1d5db" }}
+          >
+            <option value="">Select player</option>
+            {availableAPlayers.map(p => (
+              <option key={p.id} value={p.id}>{p.name} (SL{p.skill_level})</option>
+            ))}
+          </select>
+        </div>
+        
+        <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+            {teamBName} Player
+          </label>
+          <select
+            value={teamBPlayerId}
+            onChange={(e) => setTeamBPlayerId(e.target.value)}
+            style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #d1d5db" }}
+          >
+            <option value="">Select player</option>
+            {availableBPlayers.map(p => (
+              <option key={p.id} value={p.id}>{p.name} (SL{p.skill_level})</option>
+            ))}
+          </select>
+        </div>
+      </div>
+      
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+        <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+            {teamAName} Points
+          </label>
+          <input
+            type="number"
+            min={0}
+            max={3}
+            step={1}
+            value={teamAPoints}
+            onChange={(e) => setTeamAPoints(e.target.value === '' ? 0 : Number(e.target.value))}
+            style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #d1d5db" }}
+          />
+        </div>
+        
+        <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+            {teamBName} Points
+          </label>
+          <input
+            type="number"
+            min={0}
+            max={3}
+            step={1}
+            value={teamBPoints}
+            onChange={(e) => setTeamBPoints(e.target.value === '' ? 0 : Number(e.target.value))}
+            style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #d1d5db" }}
+          />
+        </div>
+      </div>
+      
+      {scoreError && (
+        <div style={{ marginBottom: 12, padding: "8px 12px", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 4, color: "#991b1b", fontSize: 13 }}>
+          ⚠️ {scoreError}
+        </div>
+      )}
+      
+      <div style={{ display: "flex", gap: 8 }}>
+        <button 
+          onClick={handleSave}
+          disabled={!isValid}
+          style={{ 
+            padding: "8px 16px", 
+            background: isValid ? "#10b981" : "#9ca3af", 
+            color: "#fff", 
+            border: "none", 
+            borderRadius: 4,
+            cursor: isValid ? "pointer" : "not-allowed"
+          }}
+        >
+          {editingRound ? "Update Round" : "Save Round"}
+        </button>
+        <button 
+          onClick={onCancel}
+          style={{ padding: "8px 16px", background: "#fff", border: "1px solid #d1d5db", borderRadius: 4 }}
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ============ LINEUP TRACKER PANEL COMPONENT ============
+
+type LineupTrackerPanelProps = {
+  teamName: string;
+  lineupStatus: { active_lineups: Lineup[]; eliminated_lineups: Lineup[] } | null;
+  usedPlayerIds: string[];
+  players: Player[];
+};
+
+function computeMustInclude(
+  lineupStatus: { active_lineups: Lineup[]; eliminated_lineups: Lineup[] } | null,
+  players: Player[]
+): Player[] {
+  if (!lineupStatus || lineupStatus.active_lineups.length === 0) return [];
+  
+  const active = lineupStatus.active_lineups;
+  if (active.length === 0) return [];
+  
+  // Find players that appear in EVERY active lineup
+  const playerIdSets = active.map(lineup => new Set(lineup.player_ids));
+  
+  // Start with all player IDs from first lineup
+  let mustIncludeIds = new Set(playerIdSets[0]);
+  
+  // Intersect with each subsequent lineup
+  for (let i = 1; i < playerIdSets.length; i++) {
+    const currentIds = Array.from(mustIncludeIds);
+    mustIncludeIds = new Set(currentIds.filter(id => playerIdSets[i].has(id)));
+  }
+  
+  // Convert to Player objects
+  return Array.from(mustIncludeIds)
+    .map(id => players.find(p => p.id === id))
+    .filter((p): p is Player => p !== undefined);
+}
+
+function LineupTrackerPanel({ teamName, lineupStatus, usedPlayerIds, players }: LineupTrackerPanelProps) {
+  const activeCount = lineupStatus?.active_lineups.length ?? 0;
+  const eliminatedCount = lineupStatus?.eliminated_lineups.length ?? 0;
+  const mustIncludePlayers = computeMustInclude(lineupStatus, players);
+  
+  // Determine warning level
+  const isCritical = activeCount === 1;
+  const isWarning = activeCount >= 2 && activeCount <= 3;
+  
+  // Get most likely lineup (first one marked as most_likely, or first active if none marked)
+  const mostLikelyLineup = lineupStatus?.active_lineups.find(l => l.most_likely) 
+    ?? lineupStatus?.active_lineups[0];
+  const otherActiveLineups = lineupStatus?.active_lineups.filter(l => l !== mostLikelyLineup) ?? [];
+  
+  if (!lineupStatus || (activeCount === 0 && eliminatedCount === 0)) {
+    return null;
+  }
+  
+  return (
+    <div
+      style={{
+        border: isCritical ? "2px solid #dc2626" : isWarning ? "2px solid #f59e0b" : "1px solid #ddd",
+        borderRadius: 8,
+        padding: 16,
+        background: isCritical ? "#fef2f2" : isWarning ? "#fffbeb" : "#fff",
+        marginBottom: 24,
+      }}
+    >
+      {/* Header with Team Name */}
+      <h3 style={{ marginTop: 0, marginBottom: 12 }}>
+        📊 {teamName} Lineup Tracker
+      </h3>
+      
+      {/* Summary Row */}
+      <div
+        style={{
+          display: "flex",
+          gap: 16,
+          marginBottom: 12,
+          fontSize: 14,
+          fontWeight: 600,
+        }}
+      >
+        <span style={{ 
+          color: activeCount <= 3 ? "#92400e" : "#1f2937",
+          background: activeCount <= 3 ? "#fef3c7" : "#f3f4f6",
+          padding: "6px 12px",
+          borderRadius: 4,
+          border: activeCount <= 3 ? "1px solid #f59e0b" : "1px solid #e5e7eb",
+        }}>
+          Active: {activeCount}
+        </span>
+        <span style={{ 
+          color: "#6b7280",
+          background: "#f3f4f6",
+          padding: "6px 12px",
+          borderRadius: 4,
+          border: "1px solid #e5e7eb",
+        }}>
+          Eliminated: {eliminatedCount}
+        </span>
+      </div>
+      
+      {/* Pressure Banner */}
+      {isCritical && (
+        <div
+          style={{
+            padding: "10px 14px",
+            marginBottom: 12,
+            borderRadius: 4,
+            background: "#fee2e2",
+            border: "2px solid #dc2626",
+            color: "#991b1b",
+            fontWeight: 700,
+            fontSize: 14,
+          }}
+        >
+          🔴 Only one viable lineup remains — lineup locked!
+        </div>
+      )}
+      {isWarning && (
+        <div
+          style={{
+            padding: "10px 14px",
+            marginBottom: 12,
+            borderRadius: 4,
+            background: "#fef3c7",
+            border: "1px solid #f59e0b",
+            color: "#92400e",
+            fontSize: 14,
+          }}
+        >
+          🟡 Limited options: {activeCount} active lineups
+        </div>
+      )}
+      
+      {/* Must Include Players */}
+      {mustIncludePlayers.length > 0 && (
+        <div style={{ fontSize: 13, marginBottom: 12, color: "#7c3aed" }}>
+          <strong>Must include:</strong>{" "}
+          {mustIncludePlayers.map((p, idx) => (
+            <span key={p.id}>
+              {idx > 0 && ", "}
+              {p.name} (SL{p.skill_level})
+            </span>
+          ))}
+        </div>
+      )}
+      
+      {/* Already Used Players (for reference) */}
+      {usedPlayerIds.length > 0 && (
+        <div style={{ fontSize: 12, marginBottom: 12, color: "#6b7280" }}>
+          <strong>Used:</strong>{" "}
+          {usedPlayerIds.map((pid, idx) => {
+            const p = findPlayer({ players } as Team, pid);
+            return (
+              <span key={pid}>
+                {idx > 0 && ", "}
+                {p?.name || pid}
+              </span>
+            );
+          })}
+        </div>
+      )}
+      
+      {/* Lineup Lists */}
+      <div style={{ fontSize: 13 }}>
+        {/* Most Likely Lineup */}
+        {mostLikelyLineup && (
+          <div
+            style={{
+              padding: "10px 14px",
+              marginBottom: 8,
+              borderRadius: 6,
+              background: "#d1fae5",
+              border: "2px solid #10b981",
+              color: "#065f46",
+              fontWeight: 700,
+            }}
+          >
+            ⭐ Most Likely Lineup: {mostLikelyLineup.label}
+            {mostLikelyLineup.count && mostLikelyLineup.count > 1 && (
+              <span style={{ fontWeight: 400, marginLeft: 8 }}>
+                ({mostLikelyLineup.count} combos)
+              </span>
+            )}
+          </div>
+        )}
+        
+        {/* Other Active Lineups */}
+        {otherActiveLineups.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 6, fontWeight: 600 }}>
+              OTHER ACTIVE LINEUPS
+            </div>
+            {otherActiveLineups.map((lineup, idx) => (
+              <div
+                key={`active-${idx}`}
+                style={{
+                  padding: "8px 12px",
+                  marginBottom: 4,
+                  borderRadius: 4,
+                  background: "#f9fafb",
+                  border: "1px solid #e5e7eb",
+                  color: "#1f2937",
+                }}
+              >
+                {lineup.label}
+                {lineup.count && lineup.count > 1 && (
+                  <span style={{ color: "#6b7280", marginLeft: 8 }}>
+                    ({lineup.count} combos)
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+        
+        {/* Eliminated Lineups */}
+        {lineupStatus.eliminated_lineups.length > 0 && (
+          <div>
+            <div style={{ fontSize: 11, color: "#991b1b", marginBottom: 6, fontWeight: 600 }}>
+              ELIMINATED LINEUPS
+            </div>
+            {lineupStatus.eliminated_lineups.map((lineup, idx) => (
+              <div
+                key={`elim-${idx}`}
+                style={{
+                  padding: "6px 10px",
+                  marginBottom: 4,
+                  borderRadius: 4,
+                  background: "#fef2f2",
+                  border: "1px solid #fecaca",
+                  color: "#991b1b",
+                  textDecoration: "line-through",
+                  opacity: 0.7,
+                  fontSize: 12,
+                }}
+              >
+                {lineup.label}
+                {lineup.count && lineup.count > 1 && (
+                  <span style={{ opacity: 0.7 }}> ({lineup.count} combos)</span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
@@ -122,6 +791,17 @@ export default function Dashboard() {
     eliminated_lineups: Lineup[];
   } | null>(null);
 
+  // Score tracking state
+  const [scoreState, setScoreState] = useState<ScoreState>({
+    raceTo: RACE_TO,
+    rounds: [],
+    teamAScore: 0,
+    teamBScore: 0,
+    status: "in_progress",
+  });
+  const [showRoundForm, setShowRoundForm] = useState(false);
+  const [editingRound, setEditingRound] = useState<Round | null>(null);
+
   const [selectedOurPlayerId, setSelectedOurPlayerId] = useState("");
   const [selectedOppPlayerId, setSelectedOppPlayerId] = useState("");
 
@@ -129,6 +809,89 @@ export default function Dashboard() {
   const [status, setStatus] = useState("Ready");
 
   const matchComplete = !!matchState && matchState.round_index > 5;
+
+  // Derived values for score context
+  const teamAContext = useMemo(() => 
+    computeScoreContext(scoreState.teamAScore, scoreState.teamBScore, scoreState.raceTo),
+    [scoreState.teamAScore, scoreState.teamBScore, scoreState.raceTo]
+  );
+  const teamBContext = useMemo(() => 
+    computeScoreContext(scoreState.teamBScore, scoreState.teamAScore, scoreState.raceTo),
+    [scoreState.teamBScore, scoreState.teamAScore, scoreState.raceTo]
+  );
+  const nextRound = scoreState.rounds.length + 1;
+  const usedAPlayerIds = scoreState.rounds.map(r => r.teamAPlayerId);
+  const usedBPlayerIds = scoreState.rounds.map(r => r.teamBPlayerId);
+
+  // Handle save round (add or update)
+  const handleSaveRound = (round: Round) => {
+    setScoreState(prev => {
+      const existingIndex = prev.rounds.findIndex(r => r.round === round.round);
+      let newRounds: Round[];
+      
+      if (existingIndex >= 0) {
+        // Update existing round
+        newRounds = [...prev.rounds];
+        newRounds[existingIndex] = round;
+      } else {
+        // Add new round
+        newRounds = [...prev.rounds, round];
+      }
+      
+      // Recalculate scores
+      const teamAScore = newRounds.reduce((sum, r) => sum + r.teamAPoints, 0);
+      const teamBScore = newRounds.reduce((sum, r) => sum + r.teamBPoints, 0);
+      
+      let status: MatchStatus = "in_progress";
+      if (teamAScore >= prev.raceTo || teamBScore >= prev.raceTo) {
+        status = "clinched";
+      } else if (newRounds.length >= 5) {
+        status = "complete";
+      }
+      
+      return {
+        ...prev,
+        rounds: newRounds,
+        teamAScore,
+        teamBScore,
+        status,
+      };
+    });
+    
+    setShowRoundForm(false);
+    setEditingRound(null);
+  };
+
+  // Handle delete round (undo)
+  const handleDeleteRound = (roundNum: number) => {
+    if (!window.confirm(`Delete Round ${roundNum}?`)) return;
+    
+    setScoreState(prev => {
+      const newRounds = prev.rounds.filter(r => r.round !== roundNum);
+      const teamAScore = newRounds.reduce((sum, r) => sum + r.teamAPoints, 0);
+      const teamBScore = newRounds.reduce((sum, r) => sum + r.teamBPoints, 0);
+      
+      let status: MatchStatus = "in_progress";
+      if (teamAScore >= prev.raceTo || teamBScore >= prev.raceTo) {
+        status = "clinched";
+      } else if (newRounds.length >= 5) {
+        status = "complete";
+      }
+      
+      return {
+        ...prev,
+        rounds: newRounds,
+        teamAScore,
+        teamBScore,
+        status,
+      };
+    });
+  };
+
+  const handleEditRound = (round: Round) => {
+    setEditingRound(round);
+    setShowRoundForm(true);
+  };
 
   const currentFirstDeclarer = useMemo(() => {
     if (!matchState) return null;
@@ -716,6 +1479,84 @@ export default function Dashboard() {
             </div>
           </section>
 
+          {/* LIVE SCORE PANEL */}
+          {matchState && (
+            <ScorePanel
+              teamAName={matchState.our_team.name}
+              teamBName={matchState.opp_team.name}
+              teamAScore={scoreState.teamAScore}
+              teamBScore={scoreState.teamBScore}
+              raceTo={scoreState.raceTo}
+              status={scoreState.status}
+              teamAContext={teamAContext}
+              teamBContext={teamBContext}
+            />
+          )}
+
+          {/* ROUND HISTORY & ENTRY */}
+          {matchState && scoreState.status !== "clinched" && scoreState.status !== "complete" && (
+            <section
+              style={{
+                border: "1px solid #ddd",
+                borderRadius: 8,
+                padding: 16,
+                marginBottom: 24,
+              }}
+            >
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                <h3 style={{ margin: 0 }}>📋 Round History</h3>
+                <button 
+                  onClick={() => { setEditingRound(null); setShowRoundForm(true); }}
+                  disabled={scoreState.rounds.length >= 5}
+                  style={{ padding: "6px 12px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 4 }}
+                >
+                  + Add Round
+                </button>
+              </div>
+              
+              {showRoundForm && (
+                <RoundEntryForm
+                  nextRound={nextRound}
+                  teamAName={matchState.our_team.name}
+                  teamBName={matchState.opp_team.name}
+                  teamAPlayers={matchState.our_team.players}
+                  teamBPlayers={matchState.opp_team.players}
+                  usedAPlayerIds={usedAPlayerIds}
+                  usedBPlayerIds={usedBPlayerIds}
+                  editingRound={editingRound}
+                  onSave={handleSaveRound}
+                  onCancel={() => { setShowRoundForm(false); setEditingRound(null); }}
+                />
+              )}
+              
+              <RoundHistory
+                rounds={scoreState.rounds}
+                teamAName={matchState.our_team.name}
+                teamBName={matchState.opp_team.name}
+                onEditRound={handleEditRound}
+                onDeleteRound={handleDeleteRound}
+              />
+            </section>
+          )}
+
+          {/* LINEUP TRACKER PANEL - HIGH VISIBILITY */}
+          {!matchComplete && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+              <LineupTrackerPanel
+                teamName={matchState.our_team.name}
+                lineupStatus={ourLineupStatus}
+                usedPlayerIds={matchState.our_used_player_ids}
+                players={matchState.our_team.players}
+              />
+              <LineupTrackerPanel
+                teamName={matchState.opp_team.name}
+                lineupStatus={oppLineupStatus}
+                usedPlayerIds={matchState.opp_used_player_ids}
+                players={matchState.opp_team.players}
+              />
+            </div>
+          )}
+
           <div
             style={{
               display: "grid",
@@ -856,6 +1697,31 @@ export default function Dashboard() {
                   }}
                 >
                   <h3>Best First Declaration</h3>
+                  <div style={{ 
+                    marginBottom: 12, 
+                    padding: "8px 12px", 
+                    borderRadius: 6,
+                    background: getScoreContextBadgeStyle(teamAContext).bg,
+                    border: `1px solid ${getScoreContextBadgeStyle(teamAContext).border}`,
+                    color: getScoreContextBadgeStyle(teamAContext).color,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center"
+                  }}>
+                    <span>{getScoreContextGuidance(teamAContext)}</span>
+                    <span style={{ 
+                      textTransform: "uppercase", 
+                      fontSize: 11,
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      background: getScoreContextBadgeStyle(teamAContext).border,
+                      color: "#fff"
+                    }}>
+                      {teamAContext.replace("_", " ")}
+                    </span>
+                  </div>
                   {bestFirstRecs.map((rec) => (
                     <div
                       key={rec.player.id}
@@ -907,6 +1773,18 @@ export default function Dashboard() {
                           <strong>Strategy:</strong> {rec.explanation.strategy}
                         </p>
                       )}
+                      
+                      {/* Score-aware reasoning */}
+                      <p style={{ 
+                        marginTop: 8, 
+                        paddingTop: 8, 
+                        borderTop: "1px solid #e5e7eb",
+                        fontSize: 12, 
+                        fontStyle: "italic",
+                        color: getScoreContextBadgeStyle(teamAContext).color
+                      }}>
+                        💡 {getScoreContextReasoning(teamAContext, "first")}
+                      </p>
 
                       <button onClick={() => setSelectedOurPlayerId(rec.player.id)}>
                         Use This Player
@@ -926,6 +1804,31 @@ export default function Dashboard() {
                   }}
                 >
                   <h3>Best Response</h3>
+                  <div style={{ 
+                    marginBottom: 12, 
+                    padding: "8px 12px", 
+                    borderRadius: 6,
+                    background: getScoreContextBadgeStyle(teamAContext).bg,
+                    border: `1px solid ${getScoreContextBadgeStyle(teamAContext).border}`,
+                    color: getScoreContextBadgeStyle(teamAContext).color,
+                    fontSize: 13,
+                    fontWeight: 600,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center"
+                  }}>
+                    <span>{getScoreContextGuidance(teamAContext)}</span>
+                    <span style={{ 
+                      textTransform: "uppercase", 
+                      fontSize: 11,
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      background: getScoreContextBadgeStyle(teamAContext).border,
+                      color: "#fff"
+                    }}>
+                      {teamAContext.replace("_", " ")}
+                    </span>
+                  </div>
                   {bestResponseRecs.map((rec) => (
                     <div
                       key={rec.player.id}
@@ -977,6 +1880,18 @@ export default function Dashboard() {
                           <strong>Strategy:</strong> {rec.explanation.strategy}
                         </p>
                       )}
+                      
+                      {/* Score-aware reasoning */}
+                      <p style={{ 
+                        marginTop: 8, 
+                        paddingTop: 8, 
+                        borderTop: "1px solid #e5e7eb",
+                        fontSize: 12, 
+                        fontStyle: "italic",
+                        color: getScoreContextBadgeStyle(teamAContext).color
+                      }}>
+                        💡 {getScoreContextReasoning(teamAContext, "response")}
+                      </p>
 
                       <button onClick={() => setSelectedOurPlayerId(rec.player.id)}>
                         Use This Player
