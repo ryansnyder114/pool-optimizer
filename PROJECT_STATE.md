@@ -6,224 +6,215 @@ Pool match optimizer app with:
 
 * React frontend (Dashboard.tsx)
 * FastAPI backend
-* Real player-based lineup generation and elimination
-* Live match decision support tools
+* Real player-based lineup optimization
+* Live match decision assistant
 
 ---
 
 ## Completed Features
 
-### 1. Lineup Tracker (Core Engine + UI)
+### 1. Lineup Engine + Tracker UI
 
 * Generates all valid 5-player lineups (≤23 SL)
-* Uses real player combinations (not abstract)
-* Aggregates duplicate skill patterns
+* Uses real player combinations
 * Tracks:
 
   * Active lineups
   * Eliminated lineups
   * Most likely lineup
-* UI features:
+* UI:
 
   * Most likely lineup highlighted
-  * Active vs eliminated sections
-  * Lineup counts per team
-  * Pressure indicators:
-
-    * 1 lineup → locked warning
-    * 2–3 → limited options
+  * Active / eliminated sections
+  * Lineup counts
+  * Pressure indicators (1 = locked, 2–3 = limited)
   * Must-include players (intersection of active lineups)
 
 ---
 
-### 2. Live Score Tracking System (NEW)
+### 2. Live Score Tracking System
 
-#### Match Rules (Fixed)
+#### Match Rules
 
 * Open 8-ball format
 * Max 5 rounds
-* Each round = one individual match
-* Each round awards up to 3 team points
-* Match is a race to 8 team points
-* No scoring modes (single rule system only)
-
----
+* Each round awards 0–3 team points
+* Race to 8 team points
+* No scoring modes (fixed system)
 
 #### Score State
 
-Tracked in frontend:
-
-* teamAScore
-* teamBScore
+* teamAScore / teamBScore
 * raceTo = 8
-* rounds[] (history of completed rounds)
+* rounds[]
 * match status:
 
   * in_progress
   * clinched
   * complete
 
----
+#### Round Entry
 
-#### Round Structure
-
-Each round stores:
-
-* round number
-* Team A player + SL
-* Team B player + SL
-* teamAPoints (0–3)
-* teamBPoints (0–3)
-* winner (derived from points)
-
----
-
-#### Score Entry UI
-
-* Fast round entry form
-* Player selection (prevents reuse)
-* Points input (0–3 inclusive)
-* Winner is automatically derived from points
+* Player selection (no duplicates)
+* Points input (0–3)
+* Winner automatically derived from points
 * Validation:
 
   * no tied scores
-  * winner must match higher points
+  * valid score ranges
   * max 5 rounds
-  * no duplicate players
-
----
 
 #### Round History
 
-* Displays all completed rounds
-* Shows:
-
-  * players
-  * score (e.g., 2–1)
-  * winner
-  * running totals
-* Supports:
-
-  * edit round
-  * delete round (undo)
-  * automatic score recalculation
+* Displays all rounds
+* Shows players, score, winner, running totals
+* Supports edit + delete (undo)
+* Recalculates totals automatically
 
 ---
 
 ### 3. Score Context Engine
 
-Derived match states:
+Derived states:
 
 * neutral
 * protect_lead
 * trailing
 * desperation
 
-Based on:
+Used for:
 
-* score difference
-* proximity to race target (8)
-
-Used to drive:
-
+* UI labels
 * recommendation context
-* UI indicators
 
 ---
 
-### 4. Score-Aware Recommendations (NEW)
+### 4. Score-Aware Recommendations
 
-Recommendations now include:
+Enhancements:
 
-#### Context Banner
+* Context banner (e.g., "Protect Lead")
+* Guidance text based on score
+* Per-recommendation reasoning:
 
-* Displays current match state:
+  * explains decisions in match context
+* No backend changes (frontend interpretation only)
 
-  * Neutral
-  * Protect Lead
-  * Trailing
-  * Desperation
+---
 
-#### Guidance Text
+### 5. Round Declaration Turn Engine (NEW)
 
-Examples:
+#### Core Logic
 
-* "Protecting a lead — prioritize safer matchups"
-* "Trailing — prioritize immediate win potential"
+* Tracks:
 
-#### Reasoning Layer
+  * startingDeclaringTeam
+  * current round
+  * declarationStep ("first" | "response" | "complete")
+* Alternates first declaration each round:
 
-Each recommendation includes:
+  * Round 1 = starting team
+  * Round 2 = opposite
+  * Round 3 = original, etc.
 
-* explanation tied to score context
-* no change to backend calculations
-* purely interpretive layer
+#### UI Behavior
+
+* Turn banner:
+
+  * shows round number
+  * shows which team declares first
+  * shows current step (waiting / respond)
+* Player selection:
+
+  * only active team enabled
+  * other team disabled with "Not your turn"
+* Recommendation display:
+
+  * first-declaration recommendations shown only during "first"
+  * response recommendations shown only during "response"
+
+---
+
+## Current Issue (ACTIVE BUG)
+
+### First Declaration Not Confirming
+
+* Selecting a player only highlights it
+* No action to confirm first declaration
+* `declarationStep` remains "first"
+* App stuck at:
+  → "WAITING FOR FIRST DECLARATION"
+
+#### Required Fix
+
+* Add "Confirm First Declaration" action
+* On confirm:
+
+  * store `firstDeclaredPlayer`
+  * advance step → "response"
+  * unlock responding team
+  * update turn banner
 
 ---
 
 ## Current Architecture
 
-System is now composed of:
+System now consists of:
 
 1. **Lineup Engine**
-
-   * Valid lineups
-   * elimination tracking
-
 2. **Score Engine**
-
-   * round tracking
-   * match state
-   * race-to-8 logic
-
 3. **Context Engine**
-
-   * score pressure classification
-
-4. **Decision Layer (Frontend)**
-
-   * recommendations
-   * score-aware explanations
+4. **Turn Engine (round flow)**
+5. **Decision Layer (recommendations + explanations)**
 
 ---
 
-## Key UX Improvements
+## Key UX Principles Achieved
 
-* Live match usability prioritized
-* Fast data entry (no unnecessary inputs like winner dropdown)
-* Readable in <2 seconds during play
-* Clear decision guidance, not just raw data
+* Built for live match use
+* Fast input, minimal friction
+* Clear turn guidance
+* Recommendations tied to real context
+* Readable in <2 seconds
 
 ---
 
 ## Next Priority
 
-### Opponent Behavior Modeling
+### Fix First Declaration Confirmation
 
-Use score context to influence:
-
-* expected opponent choices
-* most likely lineup prediction
-
-Examples:
-
-* Neutral → standard matchups (e.g., 7 vs 7)
-* Trailing → aggressive mismatches
-* Leading → conservative / control plays
+* Add confirm action
+* advance state properly
+* unlock response flow
 
 ---
 
-## Future Enhancements (Planned)
+## Upcoming Features
 
-* Captain Mode decision engine
-* Opponent prediction weighting
-* Forward simulation (optional later)
-* UI polish / layout refinement
+### 1. Opponent Behavior Modeling
+
+* Adjust expectations based on score:
+
+  * neutral → standard matchups
+  * trailing → aggressive plays
+  * leading → conservative
+
+### 2. Improved Lineup Prediction
+
+* Use score + behavior to refine:
+
+  * most likely lineup
+  * expected opponent moves
+
+### 3. Captain Mode Enhancements
+
+* smarter decision weighting
+* future-round awareness (light)
 
 ---
 
 ## Notes
 
-* No backend changes required for scoring yet
-* All new logic implemented in Dashboard.tsx
-* System designed to layer intelligence incrementally (no over-engineering)
+* All new logic currently in Dashboard.tsx
+* Backend unchanged for scoring
+* System built incrementally (no over-engineering)
