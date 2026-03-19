@@ -813,7 +813,7 @@ export default function Dashboard() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Ready");
 
-  const matchComplete = !!matchState && matchState.round_index > 5;
+  const matchComplete = !!matchState && matchState.round_index !== undefined && matchState.round_index > 5;
 
   // Derived values for score context
   const teamAContext = useMemo(() => 
@@ -825,16 +825,29 @@ export default function Dashboard() {
     [scoreState.teamBScore, scoreState.teamAScore, scoreState.raceTo]
   );
   const nextRound = scoreState.rounds.length + 1;
+  
+  // Canonical source of truth for used players - arrays derived from scoreState
   const usedAPlayerIds = scoreState.rounds.map(r => r.teamAPlayerId);
   const usedBPlayerIds = scoreState.rounds.map(r => r.teamBPlayerId);
+  // Sets for O(1) lookup
+  const usedAPlayerIdSet = new Set(usedAPlayerIds);
+  const usedBPlayerIdSet = new Set(usedBPlayerIds);
 
   // Derive which team declares first based on round number and starting team
   const currentRoundDeclaringTeam: "teamA" | "teamB" = 
     (nextRound % 2 === 1) === (startingDeclaringTeam === "teamA") ? "teamA" : "teamB";
   
-  const isOurTeam = matchState?.our_team.id ? true : false; // simplified - our team is teamA in this UI
-  const declaringTeamName = currentRoundDeclaringTeam === "teamA" ? matchState?.our_team.name || "Team A" : matchState?.opp_team.name || "Team B";
-  const respondingTeamName = currentRoundDeclaringTeam === "teamA" ? matchState?.opp_team.name || "Team B" : matchState?.our_team.name || "Team A";
+  // Safe team names - always have fallbacks
+  const ourTeamName = matchState?.our_team?.name || "Our Team";
+  const oppTeamName = matchState?.opp_team?.name || "Opponent";
+  const declaringTeamName = currentRoundDeclaringTeam === "teamA" ? ourTeamName : oppTeamName;
+  const respondingTeamName = currentRoundDeclaringTeam === "teamA" ? oppTeamName : ourTeamName;
+
+  // Determine if a player is in their turn and can be selected
+  const isTeamAInTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamA") ||
+                         (declarationStep === "response" && currentRoundDeclaringTeam !== "teamA");
+  const isTeamBInTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamB") ||
+                         (declarationStep === "response" && currentRoundDeclaringTeam !== "teamB");
 
   // Handle save round (add or update)
   const handleSaveRound = (round: Round) => {
@@ -873,6 +886,9 @@ export default function Dashboard() {
     
     setShowRoundForm(false);
     setEditingRound(null);
+    
+    // Recalculate live declaration flow after saving round
+    recalculateDeclarationFlow();
   };
 
   // Handle delete round (undo)
@@ -899,6 +915,27 @@ export default function Dashboard() {
         status,
       };
     });
+    
+    // Recalculate live declaration flow from updated round history
+    recalculateDeclarationFlow();
+  };
+
+  // Helper to recalculate turn state after round changes (delete/edit/add)
+  const recalculateDeclarationFlow = (roundCount?: number) => {
+    // Use provided count or current state
+    const roundsNow = roundCount ?? scoreState.rounds.length;
+    
+    // Clear first declared player (no longer valid for new round state)
+    setFirstDeclaredPlayer(null);
+    
+    // Reset to first step since we're starting fresh for this round
+    setDeclarationStep("first");
+    
+    // Clear any stale player selections for new round
+    setSelectedOurPlayerId("");
+    setSelectedOppPlayerId("");
+    setBestFirstRecs([]);
+    setBestResponseRecs([]);
   };
 
   const handleEditRound = (round: Round) => {
@@ -908,6 +945,7 @@ export default function Dashboard() {
 
   const currentFirstDeclarer = useMemo(() => {
     if (!matchState) return null;
+    if (!matchState.first_declarer_by_round || matchState.round_index === undefined) return null;
     return matchState.first_declarer_by_round[matchState.round_index - 1] ?? null;
   }, [matchState]);
 
@@ -1156,7 +1194,7 @@ export default function Dashboard() {
       setFirstDeclaredPlayer(null);
       await refreshLegalPlayers(nextState);
       await refreshLineupStatuses(nextState);
-      setStatus(nextState.round_index > 5 ? "Match complete." : "Matchup locked.");
+      setStatus(nextState.round_index !== undefined && nextState.round_index > 5 ? "Match complete." : "Matchup locked.");
     } catch (err: any) {
       setStatus(err?.message || "Failed to apply matchup.");
     } finally {
@@ -1171,13 +1209,27 @@ export default function Dashboard() {
     // Determine which player was selected based on who's declaring
     const declaringIsTeamA = currentRoundDeclaringTeam === "teamA";
     const selectedPlayerId = declaringIsTeamA ? selectedOurPlayerId : selectedOppPlayerId;
-    const declaringTeam = matchState?.our_team.name || "Team A";
+    
+    // Validate selected player exists and is available
+    if (!selectedPlayerId || !matchState?.our_team || !matchState?.opp_team) {
+      setStatus("Select a player first");
+      return;
+    }
+    
     const player = declaringIsTeamA 
-      ? matchState?.our_team.players.find(p => p.id === selectedPlayerId)
-      : matchState?.opp_team.players.find(p => p.id === selectedPlayerId);
+      ? matchState.our_team.players.find(p => p.id === selectedPlayerId)
+      : matchState.opp_team.players.find(p => p.id === selectedPlayerId);
+    
+    // Verify player is actually selectable (not already used)
+    const isUsed = declaringIsTeamA ? usedAPlayerIdSet.has(selectedPlayerId) : usedBPlayerIdSet.has(selectedPlayerId);
     
     if (!player) {
-      setStatus("Select a player first");
+      setStatus("Invalid player selection");
+      return;
+    }
+    
+    if (isUsed) {
+      setStatus("Player already used in this match");
       return;
     }
     
@@ -1188,7 +1240,7 @@ export default function Dashboard() {
       team: currentRoundDeclaringTeam
     });
     setDeclarationStep("response");
-    setStatus(`${declaringTeam} declared ${player.name} — waiting for response`);
+    setStatus(`${declaringTeamName} declared ${player.name} — waiting for response`);
   };
 
   const ourLegalIds = new Set(ourLegalPlayers.map((p) => p.id));
@@ -1519,17 +1571,16 @@ export default function Dashboard() {
             <h2>Live Match Dashboard</h2>
             <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
               <div>
-                <strong>Round:</strong> {Math.min(matchState.round_index, 5)}
+                <strong>Round:</strong> {nextRound}
               </div>
               <div>
-                <strong>Score:</strong> Us {matchState.our_points.toFixed(2)} -{" "}
-                {matchState.opp_points.toFixed(2)} Opp
+                <strong>Score:</strong> Us {scoreState.teamAScore} - {scoreState.teamBScore} Opp
               </div>
               <div>
                 <strong>Current Declaration:</strong>{" "}
-                {currentFirstDeclarer === "us"
-                  ? "We declare first"
-                  : "Opponent declares first"}
+                {currentRoundDeclaringTeam === "teamA"
+                  ? `${ourTeamName} declares first`
+                  : `${oppTeamName} declares first`}
               </div>
               <div>
                 <strong>Status:</strong> {matchComplete ? "Match Complete" : "In Progress"}
@@ -1605,7 +1656,7 @@ export default function Dashboard() {
                 </button>
               </div>
               
-              {showRoundForm && (
+              {showRoundForm && matchState && (
                 <RoundEntryForm
                   nextRound={nextRound}
                   teamAName={matchState.our_team.name}
@@ -1631,18 +1682,18 @@ export default function Dashboard() {
           )}
 
           {/* LINEUP TRACKER PANEL - HIGH VISIBILITY */}
-          {!matchComplete && (
+          {!matchComplete && matchState && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
               <LineupTrackerPanel
                 teamName={matchState.our_team.name}
                 lineupStatus={ourLineupStatus}
-                usedPlayerIds={matchState.our_used_player_ids}
+                usedPlayerIds={usedAPlayerIds}
                 players={matchState.our_team.players}
               />
               <LineupTrackerPanel
                 teamName={matchState.opp_team.name}
                 lineupStatus={oppLineupStatus}
-                usedPlayerIds={matchState.opp_used_player_ids}
+                usedPlayerIds={usedBPlayerIds}
                 players={matchState.opp_team.players}
               />
             </div>
@@ -1677,7 +1728,7 @@ export default function Dashboard() {
                 )}
               </h3>
               {matchState.our_team.players.map((p) => {
-                const used = matchState.our_used_player_ids.includes(p.id);
+                const used = usedAPlayerIdSet.has(p.id);
                 const legal = ourLegalIds.has(p.id);
                 const isMyTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamA") ||
                                  (declarationStep === "response" && currentRoundDeclaringTeam !== "teamA");
@@ -1733,7 +1784,7 @@ export default function Dashboard() {
                 )}
               </h3>
               {matchState.opp_team.players.map((p) => {
-                const used = matchState.opp_used_player_ids.includes(p.id);
+                const used = usedBPlayerIdSet.has(p.id);
                 const legal = oppLegalIds.has(p.id);
                 const isMyTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamB") ||
                                  (declarationStep === "response" && currentRoundDeclaringTeam !== "teamB");
@@ -2101,10 +2152,10 @@ export default function Dashboard() {
                 <h4>{matchState.our_team.name} - Our Lineups</h4>
                 
                 {/* Must Include Section */}
-                {matchState.our_used_player_ids.length > 0 && (
+                {usedAPlayerIds.length > 0 && (
                   <div style={{ fontSize: 12, marginBottom: 8, color: "#7c3aed" }}>
                     <strong>Must include:</strong>{" "}
-                    {matchState.our_used_player_ids.map((pid, idx) => {
+                    {usedAPlayerIds.map((pid, idx) => {
                       const p = findPlayer(matchState.our_team, pid);
                       return (
                         <span key={pid}>
@@ -2250,10 +2301,10 @@ export default function Dashboard() {
                 <h4>{matchState.opp_team.name} - Opponent Lineups</h4>
                 
                 {/* Must Include Section */}
-                {matchState.opp_used_player_ids.length > 0 && (
+                {usedBPlayerIds.length > 0 && (
                   <div style={{ fontSize: 12, marginBottom: 8, color: "#7c3aed" }}>
                     <strong>Must include:</strong>{" "}
-                    {matchState.opp_used_player_ids.map((pid, idx) => {
+                    {usedBPlayerIds.map((pid, idx) => {
                       const p = findPlayer(matchState.opp_team, pid);
                       return (
                         <span key={pid}>
