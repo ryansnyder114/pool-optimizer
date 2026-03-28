@@ -20,6 +20,12 @@ type Player = {
   skill_level: number;
   recent_win_rate?: number | null;
   notes?: string | null;
+  // APA match stats
+  matches_won?: number | null;
+  matches_played?: number | null;
+  win_percentage?: number | null;
+  points_per_match?: number | null;
+  percent_points_available?: number | null;
 };
 
 type Team = {
@@ -86,6 +92,36 @@ function badgeColor(confidence?: string): string {
 
 function findPlayer(team: Team | undefined, playerId: string): Player | undefined {
   return team?.players.find((p) => p.id === playerId);
+}
+
+// ============ STATS FORMATTING HELPERS ============
+
+function formatRecord(won?: number | null, played?: number | null): string {
+  if (won === null || won === undefined || played === null || played === undefined) {
+    return "—";
+  }
+  return `${won} / ${played}`;
+}
+
+function formatWinPercentage(pct?: number | null): string {
+  if (pct === null || pct === undefined) {
+    return "—";
+  }
+  return `${pct.toFixed(2)}%`;
+}
+
+function formatPointsPerMatch(ppm?: number | null): string {
+  if (ppm === null || ppm === undefined) {
+    return "—";
+  }
+  return ppm.toFixed(2);
+}
+
+function formatPercentPointsAvailable(ppa?: number | null): string {
+  if (ppa === null || ppa === undefined) {
+    return "—";
+  }
+  return `${ppa.toFixed(2)}%`;
 }
 
 // ============ SCORE TRACKING TYPES ============
@@ -2282,6 +2318,12 @@ export default function Dashboard() {
                     <div style={{ fontSize: 13, color: "#555" }}>
                       Win Rate: {((p.recent_win_rate ?? 0.5) * 100).toFixed(0)}%
                     </div>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      <span>Record: {formatRecord(p.matches_won, p.matches_played)}</span>
+                      <span>Win %: {formatWinPercentage(p.win_percentage)}</span>
+                      <span>Pts/M: {formatPointsPerMatch(p.points_per_match)}</span>
+                      <span>% Avail: {formatPercentPointsAvailable(p.percent_points_available)}</span>
+                    </div>
                   </div>
                 );
               })}
@@ -2344,6 +2386,12 @@ export default function Dashboard() {
                     {used ? "— Used" : !isMyTurn ? "— Not your turn" : legal ? "— Legal" : "— Unavailable"}
                     <div style={{ fontSize: 13, color: "#555" }}>
                       Win Rate: {((p.recent_win_rate ?? 0.5) * 100).toFixed(0)}%
+                    </div>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 4, display: "flex", gap: 12, flexWrap: "wrap" }}>
+                      <span>Record: {formatRecord(p.matches_won, p.matches_played)}</span>
+                      <span>Win %: {formatWinPercentage(p.win_percentage)}</span>
+                      <span>Pts/M: {formatPointsPerMatch(p.points_per_match)}</span>
+                      <span>% Avail: {formatPercentPointsAvailable(p.percent_points_available)}</span>
                     </div>
                   </div>
                 );

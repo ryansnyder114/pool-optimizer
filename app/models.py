@@ -8,6 +8,12 @@ class Player(BaseModel):
     recent_win_rate: Optional[float] = None
     vs_skill_band: Optional[Dict[str, float]] = None
     notes: Optional[str] = None
+    # APA match stats
+    matches_won: Optional[float] = None
+    matches_played: Optional[float] = None
+    win_percentage: Optional[float] = None
+    points_per_match: Optional[float] = None
+    percent_points_available: Optional[float] = None
 
 class Team(BaseModel):
     id: str

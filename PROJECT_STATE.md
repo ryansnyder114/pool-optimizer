@@ -1,147 +1,158 @@
 # PROJECT STATE (Checkpoint)
 
-## Core System Status
+## Overview
 
-The app is now a **live match decision assistant** with:
+Pool match optimizer app with:
 
-### 1. Lineup Engine
-
-* Generates all valid 5-player lineups (≤23 SL)
-* Tracks active/eliminated lineups
-* Highlights most likely lineup
-* Identifies must-include players
+* React frontend (`frontend/src/pages/Dashboard.tsx`)
+* FastAPI backend
+* Live match workflow for team 8-ball
+* Score-aware recommendations and opponent predictions
 
 ---
 
-### 2. Score Engine
+## Completed Systems
 
-* Race to 8 (team points)
-* 0–3 points per round
-* Full round history (add/edit/delete)
-* Automatic totals + validation
+### 1. Lineup Engine + Tracker UI
 
----
+* Generates all legal 5-player lineups (≤23 SL)
+* Uses real player combinations
+* Tracks:
+
+  * active lineups
+  * eliminated lineups
+  * most likely lineup
+  * must-include players
+* Main lineup tracker panels remain visible higher on the page
+
+### 2. Live Score Tracking
+
+* Race to 8 team points
+* Up to 5 rounds
+* Round history with:
+
+  * players
+  * score
+  * derived winner
+  * running totals
+* Supports edit/delete
+* Validation:
+
+  * no ties
+  * valid score ranges
+  * no duplicate player use
 
 ### 3. Score Context Engine
 
-Derived match states:
+Derived contexts:
 
 * neutral
 * protect_lead
 * trailing
 * desperation
 
-Used across UI + logic
+Used for:
 
----
+* recommendation text
+* prediction heuristics
+* contextual UI guidance
 
-### 4. Turn / Declaration Engine
+### 4. Turn / Declaration Flow
 
-* Alternating first declaration per round
 * Tracks:
 
   * `startingDeclaringTeam`
   * `declarationStep`
   * `firstDeclaredPlayer`
-* Enforces turn-based player selection
-* Supports delete/replay with correct recalculation
+* First declaration alternates by round
+* Turn banner shows whose move it is
+* Non-active team selection is disabled appropriately
 
----
+### 5. Stable Roster + Availability System
 
-### 5. Stable Roster System
-
-* Player rosters persist across delete/edit
-* Availability derived from `scoreState.rounds`
-* No dependency on transient `matchState`
-
----
-
-### 6. Player Availability System
-
-* Single source of truth (derived from rounds)
-* Consistent:
+* Team rosters persist across delete/edit/replay
+* Used players derived from `scoreState.rounds`
+* Availability logic is consistent across:
 
   * styling
   * clickability
   * validation
 
----
+### 6. Opponent Prediction Engine
 
-### 7. Prediction Engine (NEW)
+* Predicts likely first declaration
+* Predicts likely response
+* Uses score-aware heuristic weighting
+* Shows top predictions with confidence/reasoning
 
-#### First Declaration Prediction
+### 7. UI Cleanup / Live Match Workflow (Latest)
 
-* Score-aware heuristic weighting
-* Factors:
+#### Removed duplicate bottom tracker
 
-  * skill level
-  * win rate
-  * freshness
+* Removed bottom "Lineup Possibility Tracker" section
+* Kept primary lineup tracker panels above
 
-#### Response Prediction
+#### Removed confirm-first-declaration step
 
-* Based on opponent’s declared player
-* Context-aware:
+* No "Confirm First Declaration" button
+* Selecting the first player automatically:
 
-  * mirror vs mismatch logic
+  * stores `firstDeclaredPlayer`
+  * advances to response step
 
-#### Output
+#### Lock matchup now creates the round flow
 
-* Top 3 predictions
-* Confidence levels
-* Reasoning text
+* Clicking "Lock Matchup" now:
 
----
+  * stores `lockedMatchup`
+  * opens score entry with the two selected players prefilled
+* User does not need to manually reselect players for the round
 
-### 8. Prediction UI Panel
+#### Simplified score entry
 
-* "Opponent Prediction" section
-* Dynamically switches:
+* Locked matchup players shown read-only
+* User only enters score/result
+* After submit:
 
-  * First play → response prediction
-* Displays:
-
-  * score context
-  * predicted players
-  * reasoning
-  * confidence badges
-
----
-
-## Architecture Status
-
-System layers now complete:
-
-1. Lineup Engine
-2. Score Engine
-3. Context Engine
-4. Turn Engine
-5. Prediction Engine ✅
-
-⚠️ Backend still unchanged (all logic frontend-driven)
+  * score updates
+  * round history updates
+  * selection state resets
+  * next round begins
 
 ---
 
-## Current State
+## Current Live Flow
 
-✅ Stable (no crashes)
-✅ Full live match workflow
-✅ Score-aware predictions
-✅ Delete/edit/replay safe
+1. App shows whose turn it is
+2. First team selects player
+3. App auto-advances to response step
+4. Other team selects player
+5. User clicks "Lock Matchup"
+6. Score form opens with both players already filled in
+7. User enters final score and submits
+8. Round history + totals update
+9. App advances to next round
 
 ---
 
-## Next Phase
+## Files Most Recently Modified
 
-### Upgrade Decision Intelligence
+* `frontend/src/pages/Dashboard.tsx`
 
-* Tie predictions into recommendations
-* Add opponent modeling refinement
-* Improve lineup probability weighting
+---
+
+## Good Next Areas (for next chat)
+
+* connect prediction + recommendation into one conditional card:
+
+  * “If they do X, we should do Y”
+* further UI polish/layout cleanup
+* deeper opponent behavior modeling
+* eventual smarter captain-decision weighting
 
 ---
 
 ## Notes
 
-* All logic currently in Dashboard.tsx
-* System is ready for deeper strategy layer
+* Backend remains mostly unchanged for these newer workflow/UI features
+* Most recent work is frontend-driven in `Dashboard.tsx`
