@@ -217,12 +217,90 @@ function getScoreContextBadgeStyle(context: ScoreContext): { bg: string; color: 
   }
 }
 
+// ============ STATS CONFIDENCE & WEIGHTING HELPERS ============
+
+// Determine confidence level based on sample size (matches played)
+function getStatConfidence(matchesPlayed: number | null | undefined): "high" | "medium" | "low" {
+  if (!matchesPlayed || matchesPlayed < 3) return "low";
+  if (matchesPlayed < 7) return "medium";
+  return "high";
+}
+
+// Get confidence multiplier (reduces stat impact for small samples)
+function getConfidenceMultiplier(matchesPlayed: number | null | undefined): number {
+  if (!matchesPlayed || matchesPlayed < 3) return 0.3;   // Low trust
+  if (matchesPlayed < 7) return 0.6;                       // Medium trust
+  return 1.0;                                               // High trust
+}
+
+// Calculate stat-based bonus score for a player
+// Returns { score, reasons } where reasons contains brief explanatory text
+function calculateStatBonus(player: Player): { score: number; reasons: string[] } {
+  let score = 0;
+  const reasons: string[] = [];
+  
+  const matchesPlayed = player.matches_played ?? 0;
+  const confidence = getConfidenceMultiplier(matchesPlayed);
+  const confLabel = getStatConfidence(matchesPlayed);
+  
+  // Win percentage bonus (main strength signal)
+  const winPct = player.win_percentage ?? null;
+  if (winPct !== null) {
+    // Normalize: 50% is baseline (0), higher is better
+    // Scale: max ~2 points for very high win%
+    const winBonus = ((winPct - 50) / 50) * 1.5 * confidence;
+    score += winBonus;
+    
+    if (winBonus > 0.5 && confidence >= 0.6) {
+      reasons.push(`Strong win % (${winPct.toFixed(1)}%)`);
+    } else if (winBonus < -0.3 && confidence >= 0.6) {
+      reasons.push(`Weak win % (${winPct.toFixed(1)}%)`);
+    }
+  }
+  
+  // Points per match bonus (team scoring impact)
+  const ppm = player.points_per_match ?? null;
+  if (ppm !== null) {
+    // Reasonable range: 0.5-2.0 points per match
+    // Baseline ~1.0, scale max ~1 point
+    const ppmBonus = ((ppm - 1.0) / 1.5) * 1.0 * confidence;
+    score += ppmBonus;
+    
+    if (ppmBonus > 0.4 && confidence >= 0.6) {
+      reasons.push(`High pts/match (${ppm.toFixed(2)})`);
+    }
+  }
+  
+  // Percent points available (efficiency signal)
+  const pctAvail = player.percent_points_available ?? null;
+  if (pctAvail !== null) {
+    // Reasonable range: 20-60%
+    // Baseline ~35%, scale max ~0.5 points
+    const availBonus = ((pctAvail - 35) / 25) * 0.5 * confidence;
+    score += availBonus;
+    
+    if (availBonus > 0.3 && confidence >= 0.6) {
+      reasons.push(`Good point conversion (${pctAvail.toFixed(1)}%)`);
+    }
+  }
+  
+  // Confidence adjustment based on sample size
+  if (matchesPlayed > 0 && matchesPlayed < 5) {
+    reasons.push(`Limited sample (${matchesPlayed} matches)`);
+  } else if (matchesPlayed >= 10) {
+    reasons.push(`Trusted profile (${matchesPlayed}+ matches)`);
+  }
+  
+  return { score, reasons };
+}
+
 // ============ PREDICTION ENGINE ============
 
 type Prediction = {
   player: Player;
   reason: string;
   confidence: "high" | "medium" | "low";
+  statReasons?: string[];
 };
 
 // Predict likely first declaration player based on score context
@@ -286,7 +364,11 @@ function predictFirstDeclaration(
       score += 0.5;
     }
     
-    return { player: p, score, reason };
+    // Stat-based bonus from APA match stats
+    const statBonus = calculateStatBonus(p);
+    score += statBonus.score;
+    
+    return { player: p, score, reason, statReasons: statBonus.reasons };
   });
   
   // Sort by score descending
@@ -297,7 +379,8 @@ function predictFirstDeclaration(
   return top.map((s, idx) => ({
     player: s.player,
     reason: s.reason,
-    confidence: idx === 0 ? "high" : idx === 1 ? "medium" : "low"
+    confidence: idx === 0 ? "high" : idx === 1 ? "medium" : "low",
+    statReasons: s.statReasons
   }));
 }
 
@@ -355,7 +438,11 @@ function predictResponse(
     const winRate = p.recent_win_rate ?? 0.5;
     score += (winRate - 0.5) * 3;
     
-    return { player: p, score, reason };
+    // Stat-based bonus from APA match stats
+    const statBonus = calculateStatBonus(p);
+    score += statBonus.score;
+    
+    return { player: p, score, reason, statReasons: statBonus.reasons };
   });
   
   scored.sort((a, b) => b.score - a.score);
@@ -363,7 +450,8 @@ function predictResponse(
   return scored.slice(0, 3).map((s, idx) => ({
     player: s.player,
     reason: s.reason,
-    confidence: idx === 0 ? "high" : idx === 1 ? "medium" : "low"
+    confidence: idx === 0 ? "high" : idx === 1 ? "medium" : "low",
+    statReasons: s.statReasons
   }));
 }
 
@@ -2162,6 +2250,11 @@ export default function Dashboard() {
                                 {pred.player.name} <span style={{ color: "#6b7280", fontWeight: 400 }}>(SL{pred.player.skill_level})</span>
                               </div>
                               <div style={{ fontSize: 12, color: "#6b7280" }}>{pred.reason}</div>
+                              {pred.statReasons && pred.statReasons.length > 0 && (
+                                <div style={{ fontSize: 11, color: "#0891b2", marginTop: 4 }}>
+                                  {pred.statReasons.join(" · ")}
+                                </div>
+                              )}
                             </div>
                             <span style={{
                               fontSize: 10,
@@ -2250,6 +2343,11 @@ export default function Dashboard() {
                                 {pred.player.name} <span style={{ color: "#6b7280", fontWeight: 400 }}>(SL{pred.player.skill_level})</span>
                               </div>
                               <div style={{ fontSize: 12, color: "#6b7280" }}>{pred.reason}</div>
+                              {pred.statReasons && pred.statReasons.length > 0 && (
+                                <div style={{ fontSize: 11, color: "#0891b2", marginTop: 4 }}>
+                                  {pred.statReasons.join(" · ")}
+                                </div>
+                              )}
                             </div>
                             <span style={{
                               fontSize: 10,
