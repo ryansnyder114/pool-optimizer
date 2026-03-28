@@ -331,6 +331,105 @@ function predictResponse(
   }));
 }
 
+// Get "If they do X, we should do Y" advice - returns JSX or null
+function getPredictionAdvice(
+  mode: "first" | "response",
+  currentRoundDeclaringTeam: "teamA" | "teamB",
+  ourTeamPlayers: Player[],
+  oppTeamPlayers: Player[],
+  usedAPlayerIdSet: Set<string>,
+  usedBPlayerIdSet: Set<string>,
+  teamAContext: ScoreContext,
+  teamBContext: ScoreContext,
+  firstDeclaredPlayer?: { id: string; name: string; team: "teamA" | "teamB" } | null
+): React.ReactNode {
+  if (mode === "first") {
+    // Predicting their first play, show our recommended response
+    const predictingForTeamA = currentRoundDeclaringTeam === "teamA";
+    const teamAPlayers = predictingForTeamA ? ourTeamPlayers : oppTeamPlayers;
+    const teamBPlayers = predictingForTeamA ? oppTeamPlayers : ourTeamPlayers;
+    const usedTeamAIds = predictingForTeamA ? usedAPlayerIdSet : usedBPlayerIdSet;
+    const usedTeamBIds = predictingForTeamA ? usedBPlayerIdSet : usedAPlayerIdSet;
+    const context = predictingForTeamA ? teamAContext : teamBContext;
+    
+    const firstPreds = predictFirstDeclaration(teamAPlayers, context, usedTeamAIds, predictingForTeamA);
+    if (firstPreds.length === 0) return null;
+    
+    const likelyFirst = firstPreds[0].player;
+    const ourBestResponse = predictResponse(teamBPlayers, likelyFirst, context, usedTeamBIds);
+    if (ourBestResponse.length === 0) return null;
+    
+    const bestOur = ourBestResponse[0];
+    
+    return (
+      <div style={{ 
+        marginTop: 16, 
+        padding: "12px", 
+        background: "#d1fae5", 
+        borderRadius: 6,
+        border: "2px solid #10b981"
+      }}>
+        <div style={{ fontSize: 12, color: "#065f46", marginBottom: 4 }}>
+          💡 If they lead with <strong>{likelyFirst.name} (SL{likelyFirst.skill_level})</strong>:
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#065f46" }}>
+          Our best response: {bestOur.player.name} (SL{bestOur.player.skill_level})
+        </div>
+        <div style={{ fontSize: 12, color: "#047857", marginTop: 4 }}>
+          {bestOur.reason}
+        </div>
+      </div>
+    );
+  } else {
+    // Response mode: they responded, show our next move
+    if (!firstDeclaredPlayer) return null;
+    
+    const respondingIsTeamA = currentRoundDeclaringTeam !== "teamA";
+    const respondingTeamPlayers = respondingIsTeamA ? ourTeamPlayers : oppTeamPlayers;
+    const usedRespIds = respondingIsTeamA ? usedAPlayerIdSet : usedBPlayerIdSet;
+    const context = respondingIsTeamA ? teamBContext : teamAContext;
+    
+    const firstPlayer = ourTeamPlayers.find(p => p.id === firstDeclaredPlayer.id) 
+      || oppTeamPlayers.find(p => p.id === firstDeclaredPlayer.id);
+    if (!firstPlayer) return null;
+    
+    const respPreds = predictResponse(respondingTeamPlayers, firstPlayer, context, usedRespIds);
+    if (respPreds.length === 0) return null;
+    
+    const likelyResponse = respPreds[0].player;
+    
+    // Compute what we'd do in next round
+    const ourTeamForNext = respondingIsTeamA ? oppTeamPlayers : ourTeamPlayers;
+    const usedOurForNext = respondingIsTeamA ? usedBPlayerIdSet : usedAPlayerIdSet;
+    const nextContext = respondingIsTeamA ? teamAContext : teamBContext;
+    const nextFirstPreds = predictFirstDeclaration(ourTeamForNext, nextContext, usedOurForNext, !respondingIsTeamA);
+    
+    if (nextFirstPreds.length === 0) return null;
+    
+    const bestNext = nextFirstPreds[0];
+    
+    return (
+      <div style={{ 
+        marginTop: 16, 
+        padding: "12px", 
+        background: "#dbeafe", 
+        borderRadius: 6,
+        border: "2px solid #3b82f6"
+      }}>
+        <div style={{ fontSize: 12, color: "#1e40af", marginBottom: 4 }}>
+          💡 If they respond with <strong>{likelyResponse.name} (SL{likelyResponse.skill_level})</strong>:
+        </div>
+        <div style={{ fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>
+          Our next round best first: {bestNext.player.name} (SL{bestNext.player.skill_level})
+        </div>
+        <div style={{ fontSize: 12, color: "#1e40af", marginTop: 4 }}>
+          {bestNext.reason}
+        </div>
+      </div>
+    );
+  }
+}
+
 // ============ SCORE PANEL COMPONENT ============
 
 type ScorePanelProps = {
@@ -1878,6 +1977,18 @@ export default function Dashboard() {
                       </div>
                     );
                   })()}
+                  
+                  {/* If they do X, we should do Y */}
+                  {getPredictionAdvice(
+                    "first",
+                    currentRoundDeclaringTeam,
+                    ourTeamPlayers,
+                    oppTeamPlayers,
+                    usedAPlayerIdSet,
+                    usedBPlayerIdSet,
+                    teamAContext,
+                    teamBContext
+                  )}
                 </div>
               ) : declarationStep === "response" && firstDeclaredPlayer ? (
                 // Predicting response
@@ -1954,6 +2065,19 @@ export default function Dashboard() {
                       </div>
                     );
                   })()}
+                  
+                  {/* If they respond with X, here's what we should consider */}
+                  {getPredictionAdvice(
+                    "response",
+                    currentRoundDeclaringTeam,
+                    ourTeamPlayers,
+                    oppTeamPlayers,
+                    usedAPlayerIdSet,
+                    usedBPlayerIdSet,
+                    teamAContext,
+                    teamBContext,
+                    firstDeclaredPlayer
+                  )}
                 </div>
               ) : null}
             </div>

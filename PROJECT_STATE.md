@@ -1,195 +1,147 @@
-# PROJECT STATE
+# PROJECT STATE (Checkpoint)
 
-## Overview
+## Core System Status
 
-Pool match optimizer app with:
+The app is now a **live match decision assistant** with:
 
-* React frontend (Dashboard.tsx)
-* FastAPI backend
-* Real player-based lineup optimization
-* Live match decision assistant
-
----
-
-## Completed Features
-
-### 1. Lineup Engine + Tracker UI
+### 1. Lineup Engine
 
 * Generates all valid 5-player lineups (≤23 SL)
-* Uses real player combinations
-* Tracks:
-
-  * Active lineups
-  * Eliminated lineups
-  * Most likely lineup
-* UI:
-
-  * Most likely lineup highlighted
-  * Active / eliminated sections
-  * Lineup counts
-  * Pressure indicators
-  * Must-include players
+* Tracks active/eliminated lineups
+* Highlights most likely lineup
+* Identifies must-include players
 
 ---
 
-### 2. Live Score Tracking System
+### 2. Score Engine
 
-* Race to 8 team points
-* Max 5 rounds
-* Each round awards 0–3 points
-* Round history with:
-
-  * players
-  * score
-  * winner (derived)
-  * running totals
-* Edit + delete (undo) support
-* Validation:
-
-  * no ties
-  * valid point ranges
-  * no duplicate players
+* Race to 8 (team points)
+* 0–3 points per round
+* Full round history (add/edit/delete)
+* Automatic totals + validation
 
 ---
 
 ### 3. Score Context Engine
 
-Derived states:
+Derived match states:
 
 * neutral
 * protect_lead
 * trailing
 * desperation
 
-Used for:
-
-* UI labels
-* recommendation guidance
+Used across UI + logic
 
 ---
 
-### 4. Score-Aware Recommendations
+### 4. Turn / Declaration Engine
 
-* Context banner (e.g., "Protect Lead")
-* Guidance text
-* Per-recommendation reasoning
-* No backend changes (frontend interpretation only)
-
----
-
-### 5. Round Declaration Turn Engine
-
+* Alternating first declaration per round
 * Tracks:
 
-  * startingDeclaringTeam
-  * current round
-  * declarationStep ("first" | "response" | "complete")
-* Alternates first declaration each round
-* UI:
-
-  * turn banner
-  * active team selection
-  * disabled opposing team
-  * step-based recommendations
+  * `startingDeclaringTeam`
+  * `declarationStep`
+  * `firstDeclaredPlayer`
+* Enforces turn-based player selection
+* Supports delete/replay with correct recalculation
 
 ---
 
-### 6. First Declaration Workflow
+### 5. Stable Roster System
 
-* Player selection
-* "Confirm First Declaration" button
-* Stores `firstDeclaredPlayer`
-* Advances step → "response"
-* Unlocks responding team
-* Banner updates dynamically
+* Player rosters persist across delete/edit
+* Availability derived from `scoreState.rounds`
+* No dependency on transient `matchState`
 
 ---
 
-### 7. State Recalculation System
+### 6. Player Availability System
 
-After delete/edit/save:
+* Single source of truth (derived from rounds)
+* Consistent:
 
-* recalculates round number
-* recalculates declaring team
-* resets declaration flow
-* clears stale selections
-
----
-
-### 8. Player Availability System (Partially Refactored)
-
-* Derived from `scoreState.rounds`
-* Uses Sets for fast lookup
-* Removes dependency on:
-
-  * `matchState.our_used_player_ids`
-  * `matchState.opp_used_player_ids`
+  * styling
+  * clickability
+  * validation
 
 ---
 
-## Active Issues
+### 7. Prediction Engine (NEW)
 
-### 1. CRITICAL: Old Declaration Logic Still Active
+#### First Declaration Prediction
 
-Runtime error:
-undefined is not an object (evaluating 'matchState.first_declarer_by_round[matchState.round_index - 1]')
+* Score-aware heuristic weighting
+* Factors:
 
-Cause:
+  * skill level
+  * win rate
+  * freshness
 
-* Old backend-driven declaration logic still exists
-* Conflicts with new frontend-derived round system
+#### Response Prediction
 
-Impact:
+* Based on opponent’s declared player
+* Context-aware:
 
-* crashes after delete/reselect
-* inconsistent turn flow
-* unstable UI state
+  * mirror vs mismatch logic
 
----
+#### Output
 
-### 2. Player Availability Mismatch
-
-* Player may appear unavailable but still clickable
-* Indicates multiple sources of truth still exist
-* Needs full unification
+* Top 3 predictions
+* Confidence levels
+* Reasoning text
 
 ---
 
-## Current Architecture
+### 8. Prediction UI Panel
 
-System components:
+* "Opponent Prediction" section
+* Dynamically switches:
+
+  * First play → response prediction
+* Displays:
+
+  * score context
+  * predicted players
+  * reasoning
+  * confidence badges
+
+---
+
+## Architecture Status
+
+System layers now complete:
 
 1. Lineup Engine
 2. Score Engine
 3. Context Engine
 4. Turn Engine
-5. Decision Layer
+5. Prediction Engine ✅
 
-⚠️ Currently mixed with legacy `matchState` logic (needs removal)
-
----
-
-## Next Priority (BLOCKING)
-
-### Remove Old Declaration System
-
-* eliminate `matchState.first_declarer_by_round`
-* eliminate `matchState.round_index` from live flow
-* unify all logic under frontend-derived state
+⚠️ Backend still unchanged (all logic frontend-driven)
 
 ---
 
-## Upcoming Features
+## Current State
 
-* Opponent behavior modeling
-* Improved lineup prediction
-* Captain decision weighting
-* Future-round awareness (light)
+✅ Stable (no crashes)
+✅ Full live match workflow
+✅ Score-aware predictions
+✅ Delete/edit/replay safe
+
+---
+
+## Next Phase
+
+### Upgrade Decision Intelligence
+
+* Tie predictions into recommendations
+* Add opponent modeling refinement
+* Improve lineup probability weighting
 
 ---
 
 ## Notes
 
-* All new logic in Dashboard.tsx
-* Backend unchanged
-* Architecture is correct, but cleanup required
+* All logic currently in Dashboard.tsx
+* System is ready for deeper strategy layer
