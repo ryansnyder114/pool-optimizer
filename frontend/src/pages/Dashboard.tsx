@@ -181,6 +181,156 @@ function getScoreContextBadgeStyle(context: ScoreContext): { bg: string; color: 
   }
 }
 
+// ============ PREDICTION ENGINE ============
+
+type Prediction = {
+  player: Player;
+  reason: string;
+  confidence: "high" | "medium" | "low";
+};
+
+// Predict likely first declaration player based on score context
+function predictFirstDeclaration(
+  players: Player[],
+  context: ScoreContext,
+  usedPlayerIds: Set<string>,
+  isOurTeam: boolean
+): Prediction[] {
+  // Filter available players
+  const available = players.filter(p => !usedPlayerIds.has(p.id));
+  
+  if (available.length === 0) return [];
+  
+  // Score context affects prioritization
+  const scored = available.map(p => {
+    let score = 0;
+    let reason = "";
+    
+    // Base: prefer balanced players (skill level 4-5) for flexibility
+    const skillLevel = p.skill_level;
+    
+    if (context === "neutral") {
+      // Standard behavior: prefer balanced players
+      if (skillLevel >= 4 && skillLevel <= 5) {
+        score += 3;
+        reason = "Balanced skill level for neutral game";
+      } else if (skillLevel === 3 || skillLevel === 6) {
+        score += 1;
+        reason = "Moderate skill level";
+      }
+    } else if (context === "protect_lead") {
+      // Safer choices: prefer lower SL, more flexibility
+      if (skillLevel <= 4) {
+        score += 3;
+        reason = "Lower skill preserves lineup flexibility (protecting lead)";
+      } else {
+        score += 0;
+        reason = "Higher skill may limit future options";
+      }
+    } else if (context === "trailing" || context === "desperation") {
+      // Aggressive: prefer higher SL for immediate win chance
+      if (skillLevel >= 6) {
+        score += 3;
+        reason = "High skill maximizes win probability (trailing)";
+      } else if (skillLevel === 5) {
+        score += 2;
+        reason = "Moderate-high skill for strong matchup";
+      } else {
+        score += 0;
+        reason = "Lower skill less ideal when behind";
+      }
+    }
+    
+    // Bonus: prefer players with good win rate
+    const winRate = p.recent_win_rate ?? 0.5;
+    score += (winRate - 0.5) * 4; // -1 to +2 bonus
+    
+    // Small bonus for players not yet used (fresh)
+    if (!usedPlayerIds.has(p.id)) {
+      score += 0.5;
+    }
+    
+    return { player: p, score, reason };
+  });
+  
+  // Sort by score descending
+  scored.sort((a, b) => b.score - a.score);
+  
+  // Return top 2-3 predictions with reasoning
+  const top = scored.slice(0, 3);
+  return top.map((s, idx) => ({
+    player: s.player,
+    reason: s.reason,
+    confidence: idx === 0 ? "high" : idx === 1 ? "medium" : "low"
+  }));
+}
+
+// Predict likely response based on first declaration and score context
+function predictResponse(
+  availablePlayers: Player[],
+  firstDeclaredPlayer: Player,
+  context: ScoreContext,
+  usedPlayerIds: Set<string>
+): Prediction[] {
+  const available = availablePlayers.filter(p => !usedPlayerIds.has(p.id));
+  
+  if (available.length === 0) return [];
+  
+  const firstSL = firstDeclaredPlayer.skill_level;
+  
+  const scored = available.map(p => {
+    let score = 0;
+    let reason = "";
+    
+    if (context === "neutral") {
+      // Mirror strategy: similar skill level
+      const slDiff = Math.abs(p.skill_level - firstSL);
+      if (slDiff <= 1) {
+        score += 3;
+        reason = "Similar skill level (neutral game)";
+      } else if (slDiff === 2) {
+        score += 1;
+        reason = "Slightly different skill level";
+      }
+    } else if (context === "protect_lead") {
+      // Safer: lower SL to avoid giving away points
+      if (p.skill_level <= firstSL) {
+        score += 3;
+        reason = "Equal or lower skill limits opponent scoring (protecting lead)";
+      } else {
+        score += 0;
+        reason = "Higher skill risks giving points";
+      }
+    } else if (context === "trailing" || context === "desperation") {
+      // Aggressive: higher SL to win
+      if (p.skill_level > firstSL) {
+        score += 3;
+        reason = `Higher skill (SL${p.skill_level} vs SL${firstSL}) maximizes win chance`;
+      } else if (p.skill_level === firstSL) {
+        score += 1;
+        reason = "Equal skill for fair matchup";
+      } else {
+        score += 0;
+        reason = "Lower skill unlikely to win when behind";
+      }
+    }
+    
+    // Win rate bonus
+    const winRate = p.recent_win_rate ?? 0.5;
+    score += (winRate - 0.5) * 3;
+    
+    return { player: p, score, reason };
+  });
+  
+  scored.sort((a, b) => b.score - a.score);
+  
+  return scored.slice(0, 3).map((s, idx) => ({
+    player: s.player,
+    reason: s.reason,
+    confidence: idx === 0 ? "high" : idx === 1 ? "medium" : "low"
+  }));
+}
+
 // ============ SCORE PANEL COMPONENT ============
 
 type ScorePanelProps = {
@@ -807,6 +957,12 @@ export default function Dashboard() {
   const [declarationStep, setDeclarationStep] = useState<"first" | "response" | "complete">("first");
   const [firstDeclaredPlayer, setFirstDeclaredPlayer] = useState<{ id: string; name: string; team: "teamA" | "teamB" } | null>(null);
 
+  // Stable team rosters - initialized once when match starts, never cleared during delete/edit
+  const [stableOurTeamPlayers, setStableOurTeamPlayers] = useState<Player[]>([]);
+  const [stableOppTeamPlayers, setStableOppTeamPlayers] = useState<Player[]>([]);
+  const [stableOurTeamName, setStableOurTeamName] = useState<string>("Our Team");
+  const [stableOppTeamName, setStableOppTeamName] = useState<string>("Opponent");
+
   const [selectedOurPlayerId, setSelectedOurPlayerId] = useState("");
   const [selectedOppPlayerId, setSelectedOppPlayerId] = useState("");
 
@@ -837,17 +993,27 @@ export default function Dashboard() {
   const currentRoundDeclaringTeam: "teamA" | "teamB" = 
     (nextRound % 2 === 1) === (startingDeclaringTeam === "teamA") ? "teamA" : "teamB";
   
-  // Safe team names - always have fallbacks
-  const ourTeamName = matchState?.our_team?.name || "Our Team";
-  const oppTeamName = matchState?.opp_team?.name || "Opponent";
-  const declaringTeamName = currentRoundDeclaringTeam === "teamA" ? ourTeamName : oppTeamName;
-  const respondingTeamName = currentRoundDeclaringTeam === "teamA" ? oppTeamName : ourTeamName;
+  // Safe team objects and names - use stable roster state that persists across delete/edit
+  const liveOurTeam = matchState?.our_team ?? null;
+  const liveOppTeam = matchState?.opp_team ?? null;
+  const liveOurTeamName = stableOurTeamName || "Our Team";
+  const liveOppTeamName = stableOppTeamName || "Opponent";
+  const ourTeamPlayers = stableOurTeamPlayers.length > 0 ? stableOurTeamPlayers : (matchState?.our_team?.players ?? []);
+  const oppTeamPlayers = stableOppTeamPlayers.length > 0 ? stableOppTeamPlayers : (matchState?.opp_team?.players ?? []);
+  const liveOurTeamId = liveOurTeam?.id ?? "";
+  const liveOppTeamId = liveOppTeam?.id ?? "";
+  const declaringTeamName = currentRoundDeclaringTeam === "teamA" ? liveOurTeamName : liveOppTeamName;
+  const respondingTeamName = currentRoundDeclaringTeam === "teamA" ? liveOppTeamName : liveOurTeamName;
 
   // Determine if a player is in their turn and can be selected
   const isTeamAInTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamA") ||
                          (declarationStep === "response" && currentRoundDeclaringTeam !== "teamA");
   const isTeamBInTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamB") ||
                          (declarationStep === "response" && currentRoundDeclaringTeam !== "teamB");
+
+  // Check if live match is active - use stable roster state as primary indicator
+  const hasLiveMatch = (matchState && liveOurTeamId && liveOppTeamId) || 
+                       (stableOurTeamPlayers.length > 0 && stableOppTeamPlayers.length > 0);
 
   // Handle save round (add or update)
   const handleSaveRound = (round: Round) => {
@@ -1115,6 +1281,11 @@ export default function Dashboard() {
       const res = await createMatch(ourTeamId, oppTeamId, firstDeclaPattern);
       const state = res.state ?? res;
       setMatchState(state);
+      // Initialize stable team rosters - these persist across delete/edit
+      setStableOurTeamPlayers(state.our_team.players);
+      setStableOppTeamPlayers(state.opp_team.players);
+      setStableOurTeamName(state.our_team.name);
+      setStableOppTeamName(state.opp_team.name);
       setBestFirstRecs([]);
       setBestResponseRecs([]);
       setSelectedOurPlayerId("");
@@ -1211,14 +1382,19 @@ export default function Dashboard() {
     const selectedPlayerId = declaringIsTeamA ? selectedOurPlayerId : selectedOppPlayerId;
     
     // Validate selected player exists and is available
-    if (!selectedPlayerId || !matchState?.our_team || !matchState?.opp_team) {
+    if (!selectedPlayerId) {
       setStatus("Select a player first");
       return;
     }
     
+    if (!hasLiveMatch) {
+      setStatus("No active match");
+      return;
+    }
+    
     const player = declaringIsTeamA 
-      ? matchState.our_team.players.find(p => p.id === selectedPlayerId)
-      : matchState.opp_team.players.find(p => p.id === selectedPlayerId);
+      ? ourTeamPlayers.find(p => p.id === selectedPlayerId)
+      : oppTeamPlayers.find(p => p.id === selectedPlayerId);
     
     // Verify player is actually selectable (not already used)
     const isUsed = declaringIsTeamA ? usedAPlayerIdSet.has(selectedPlayerId) : usedBPlayerIdSet.has(selectedPlayerId);
@@ -1579,8 +1755,8 @@ export default function Dashboard() {
               <div>
                 <strong>Current Declaration:</strong>{" "}
                 {currentRoundDeclaringTeam === "teamA"
-                  ? `${ourTeamName} declares first`
-                  : `${oppTeamName} declares first`}
+                  ? `${liveOurTeamName} declares first`
+                  : `${liveOppTeamName} declares first`}
               </div>
               <div>
                 <strong>Status:</strong> {matchComplete ? "Match Complete" : "In Progress"}
@@ -1602,7 +1778,7 @@ export default function Dashboard() {
                 {declarationStep === "first" ? (
                   <>🏓 Round {nextRound} — <strong>{declaringTeamName}</strong> puts up first</>
                 ) : firstDeclaredPlayer ? (
-                  <>🎯 <strong>{firstDeclaredPlayer.name}</strong> declared ({firstDeclaredPlayer.team === "teamA" ? matchState?.our_team.name : matchState?.opp_team.name}) — <strong>{respondingTeamName}</strong> respond!</>
+                  <>🎯 <strong>{firstDeclaredPlayer.name}</strong> declared ({firstDeclaredPlayer.team === "teamA" ? liveOurTeamName : liveOppTeamName}) — <strong>{respondingTeamName}</strong> respond!</>
                 ) : (
                   <>🏓 Round {nextRound} — Waiting for response</>
                 )}
@@ -1621,11 +1797,173 @@ export default function Dashboard() {
             </div>
           </section>
 
+          {/* PREDICTION PANEL */}
+          {matchState && !matchComplete && (
+            <div
+              style={{
+                border: "1px solid #ddd",
+                borderRadius: 8,
+                padding: 16,
+                marginBottom: 24,
+                background: "#faf5ff",
+              }}
+            >
+              <h3 style={{ marginTop: 0, marginBottom: 12, color: "#7c3aed" }}>
+                🔮 Opponent Prediction
+              </h3>
+              
+              {declarationStep === "first" ? (
+                // Predicting first declaration
+                <div>
+                  <div style={{ fontSize: 13, marginBottom: 8, color: "#6b7280" }}>
+                    Based on score context: <strong style={{ color: getScoreContextBadgeStyle(currentRoundDeclaringTeam === "teamA" ? teamAContext : teamBContext).color }}>
+                      {currentRoundDeclaringTeam === "teamA" ? teamAContext : teamBContext}
+                    </strong>
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 12, color: "#4b5563" }}>
+                    Most likely <strong>{declaringTeamName}</strong> will put up:
+                  </div>
+                  {(() => {
+                    const predictingForTeamA = currentRoundDeclaringTeam === "teamA";
+                    const teamPlayers = predictingForTeamA ? ourTeamPlayers : oppTeamPlayers;
+                    const usedIds = predictingForTeamA ? usedAPlayerIdSet : usedBPlayerIdSet;
+                    const context = predictingForTeamA ? teamAContext : teamBContext;
+                    const predictions = predictFirstDeclaration(teamPlayers, context, usedIds, predictingForTeamA);
+                    
+                    if (predictions.length === 0) {
+                      return <div style={{ color: "#6b7280" }}>No available players to predict</div>;
+                    }
+                    
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {predictions.map((pred, idx) => (
+                          <div
+                            key={pred.player.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 12,
+                              padding: "8px 12px",
+                              borderRadius: 6,
+                              background: idx === 0 ? "#ede9fe" : "#f3f4f6",
+                              border: idx === 0 ? "2px solid #7c3aed" : "1px solid #e5e7eb",
+                            }}
+                          >
+                            <span style={{ 
+                              fontWeight: 700, 
+                              color: idx === 0 ? "#7c3aed" : "#6b7280",
+                              minWidth: 24
+                            }}>
+                              {idx === 0 ? "🎯" : idx === 1 ? "2️⃣" : "3️⃣"}
+                            </span>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600 }}>
+                                {pred.player.name} <span style={{ color: "#6b7280", fontWeight: 400 }}>(SL{pred.player.skill_level})</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: "#6b7280" }}>{pred.reason}</div>
+                            </div>
+                            <span style={{
+                              fontSize: 10,
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              background: pred.confidence === "high" ? "#d1fae5" : pred.confidence === "medium" ? "#fef3c7" : "#f3f4f6",
+                              color: pred.confidence === "high" ? "#065f46" : pred.confidence === "medium" ? "#92400e" : "#6b7280",
+                              fontWeight: 600,
+                              textTransform: "uppercase"
+                            }}>
+                              {pred.confidence}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : declarationStep === "response" && firstDeclaredPlayer ? (
+                // Predicting response
+                <div>
+                  <div style={{ fontSize: 13, marginBottom: 8, color: "#6b7280" }}>
+                    Based on score context: <strong style={{ color: getScoreContextBadgeStyle(currentRoundDeclaringTeam === "teamA" ? teamBContext : teamAContext).color }}>
+                      {currentRoundDeclaringTeam === "teamA" ? teamBContext : teamAContext}
+                    </strong>
+                  </div>
+                  <div style={{ fontSize: 13, marginBottom: 12, color: "#4b5563" }}>
+                    Most likely <strong>{respondingTeamName}</strong> will respond with:
+                  </div>
+                  {(() => {
+                    const respondingIsTeamA = currentRoundDeclaringTeam !== "teamA";
+                    const teamPlayers = respondingIsTeamA ? ourTeamPlayers : oppTeamPlayers;
+                    const usedIds = respondingIsTeamA ? usedAPlayerIdSet : usedBPlayerIdSet;
+                    const context = respondingIsTeamA ? teamBContext : teamAContext;
+                    
+                    // Find the first declared player from our stored data
+                    const firstPlayer = ourTeamPlayers.find(p => p.id === firstDeclaredPlayer.id) 
+                      || oppTeamPlayers.find(p => p.id === firstDeclaredPlayer.id);
+                    
+                    if (!firstPlayer) {
+                      return <div style={{ color: "#6b7280" }}>Unknown declared player</div>;
+                    }
+                    
+                    const predictions = predictResponse(teamPlayers, firstPlayer, context, usedIds);
+                    
+                    if (predictions.length === 0) {
+                      return <div style={{ color: "#6b7280" }}>No available players to predict</div>;
+                    }
+                    
+                    return (
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {predictions.map((pred, idx) => (
+                          <div
+                            key={pred.player.id}
+                            style={{
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 12,
+                              padding: "8px 12px",
+                              borderRadius: 6,
+                              background: idx === 0 ? "#ede9fe" : "#f3f4f6",
+                              border: idx === 0 ? "2px solid #7c3aed" : "1px solid #e5e7eb",
+                            }}
+                          >
+                            <span style={{ 
+                              fontWeight: 700, 
+                              color: idx === 0 ? "#7c3aed" : "#6b7280",
+                              minWidth: 24
+                            }}>
+                              {idx === 0 ? "🎯" : idx === 1 ? "2️⃣" : "3️⃣"}
+                            </span>
+                            <div style={{ flex: 1 }}>
+                              <div style={{ fontWeight: 600 }}>
+                                {pred.player.name} <span style={{ color: "#6b7280", fontWeight: 400 }}>(SL{pred.player.skill_level})</span>
+                              </div>
+                              <div style={{ fontSize: 12, color: "#6b7280" }}>{pred.reason}</div>
+                            </div>
+                            <span style={{
+                              fontSize: 10,
+                              padding: "2px 6px",
+                              borderRadius: 4,
+                              background: pred.confidence === "high" ? "#d1fae5" : pred.confidence === "medium" ? "#fef3c7" : "#f3f4f6",
+                              color: pred.confidence === "high" ? "#065f46" : pred.confidence === "medium" ? "#92400e" : "#6b7280",
+                              fontWeight: 600,
+                              textTransform: "uppercase"
+                            }}>
+                              {pred.confidence}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+              ) : null}
+            </div>
+          )}
+
           {/* LIVE SCORE PANEL */}
           {matchState && (
             <ScorePanel
-              teamAName={matchState.our_team.name}
-              teamBName={matchState.opp_team.name}
+              teamAName={liveOurTeamName}
+              teamBName={liveOppTeamName}
               teamAScore={scoreState.teamAScore}
               teamBScore={scoreState.teamBScore}
               raceTo={scoreState.raceTo}
@@ -1659,10 +1997,10 @@ export default function Dashboard() {
               {showRoundForm && matchState && (
                 <RoundEntryForm
                   nextRound={nextRound}
-                  teamAName={matchState.our_team.name}
-                  teamBName={matchState.opp_team.name}
-                  teamAPlayers={matchState.our_team.players}
-                  teamBPlayers={matchState.opp_team.players}
+                  teamAName={liveOurTeamName}
+                  teamBName={liveOppTeamName}
+                  teamAPlayers={ourTeamPlayers}
+                  teamBPlayers={oppTeamPlayers}
                   usedAPlayerIds={usedAPlayerIds}
                   usedBPlayerIds={usedBPlayerIds}
                   editingRound={editingRound}
@@ -1673,8 +2011,8 @@ export default function Dashboard() {
               
               <RoundHistory
                 rounds={scoreState.rounds}
-                teamAName={matchState.our_team.name}
-                teamBName={matchState.opp_team.name}
+                teamAName={liveOurTeamName}
+                teamBName={liveOppTeamName}
                 onEditRound={handleEditRound}
                 onDeleteRound={handleDeleteRound}
               />
@@ -1685,16 +2023,16 @@ export default function Dashboard() {
           {!matchComplete && matchState && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
               <LineupTrackerPanel
-                teamName={matchState.our_team.name}
+                teamName={liveOurTeamName}
                 lineupStatus={ourLineupStatus}
                 usedPlayerIds={usedAPlayerIds}
-                players={matchState.our_team.players}
+                players={ourTeamPlayers}
               />
               <LineupTrackerPanel
-                teamName={matchState.opp_team.name}
+                teamName={liveOppTeamName}
                 lineupStatus={oppLineupStatus}
                 usedPlayerIds={usedBPlayerIds}
-                players={matchState.opp_team.players}
+                players={oppTeamPlayers}
               />
             </div>
           )}
@@ -1715,7 +2053,7 @@ export default function Dashboard() {
               }}
             >
               <h3>
-                {matchState.our_team.name}
+                {liveOurTeamName}
                 {declarationStep === "first" && currentRoundDeclaringTeam !== "teamA" && (
                   <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400, marginLeft: 8 }}>
                     — waiting for their turn
@@ -1727,7 +2065,7 @@ export default function Dashboard() {
                   </span>
                 )}
               </h3>
-              {matchState.our_team.players.map((p) => {
+              {ourTeamPlayers.map((p) => {
                 const used = usedAPlayerIdSet.has(p.id);
                 const legal = ourLegalIds.has(p.id);
                 const isMyTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamA") ||
@@ -1771,7 +2109,7 @@ export default function Dashboard() {
               }}
             >
               <h3>
-                {matchState.opp_team.name}
+                {liveOppTeamName}
                 {declarationStep === "first" && currentRoundDeclaringTeam !== "teamB" && (
                   <span style={{ fontSize: 12, color: "#6b7280", fontWeight: 400, marginLeft: 8 }}>
                     — waiting for their turn
@@ -1783,7 +2121,7 @@ export default function Dashboard() {
                   </span>
                 )}
               </h3>
-              {matchState.opp_team.players.map((p) => {
+              {oppTeamPlayers.map((p) => {
                 const used = usedBPlayerIdSet.has(p.id);
                 const legal = oppLegalIds.has(p.id);
                 const isMyTurn = (declarationStep === "first" && currentRoundDeclaringTeam === "teamB") ||
@@ -2106,12 +2444,12 @@ export default function Dashboard() {
             }}
           >
             <h3>Matchup History</h3>
-            {matchState.locked_matchups.length === 0 ? (
+            {!matchState?.locked_matchups?.length ? (
               <p>No completed rounds yet.</p>
             ) : (
               matchState.locked_matchups.map((m) => {
-                const ourP = findPlayer(matchState.our_team, m.our_player_id);
-                const oppP = findPlayer(matchState.opp_team, m.opp_player_id);
+                const ourP = liveOurTeam ? findPlayer(liveOurTeam, m.our_player_id) : undefined;
+                const oppP = liveOppTeam ? findPlayer(liveOppTeam, m.opp_player_id) : undefined;
 
                 return (
                   <div
@@ -2149,14 +2487,14 @@ export default function Dashboard() {
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
               {/* Our Team Lineups */}
               <div>
-                <h4>{matchState.our_team.name} - Our Lineups</h4>
+                <h4>{liveOurTeamName} - Our Lineups</h4>
                 
                 {/* Must Include Section */}
                 {usedAPlayerIds.length > 0 && (
                   <div style={{ fontSize: 12, marginBottom: 8, color: "#7c3aed" }}>
                     <strong>Must include:</strong>{" "}
                     {usedAPlayerIds.map((pid, idx) => {
-                      const p = findPlayer(matchState.our_team, pid);
+                      const p = liveOurTeam ? findPlayer(liveOurTeam, pid) : undefined;
                       return (
                         <span key={pid}>
                           {idx > 0 && ", "}
@@ -2298,14 +2636,14 @@ export default function Dashboard() {
 
               {/* Opponent Team Lineups */}
               <div>
-                <h4>{matchState.opp_team.name} - Opponent Lineups</h4>
+                <h4>{liveOppTeamName} - Opponent Lineups</h4>
                 
                 {/* Must Include Section */}
                 {usedBPlayerIds.length > 0 && (
                   <div style={{ fontSize: 12, marginBottom: 8, color: "#7c3aed" }}>
                     <strong>Must include:</strong>{" "}
                     {usedBPlayerIds.map((pid, idx) => {
-                      const p = findPlayer(matchState.opp_team, pid);
+                      const p = liveOppTeam ? findPlayer(liveOppTeam, pid) : undefined;
                       return (
                         <span key={pid}>
                           {idx > 0 && ", "}
