@@ -12,6 +12,7 @@ import {
   applyMatchup,
   getLineupStatus,
   type Lineup,
+  API_BASE,
 } from "../api";
 
 type Player = {
@@ -26,6 +27,8 @@ type Player = {
   win_percentage?: number | null;
   points_per_match?: number | null;
   percent_points_available?: number | null;
+  // Passive in-app matchup stats by opponent SL (auto-derived from rounds)
+  tracked_vs_sl?: Record<string, { matches: number; wins: number; win_percentage?: number }> | null;
 };
 
 type Team = {
@@ -72,6 +75,7 @@ function emptyPlayer(): Player {
     skill_level: 3,
     recent_win_rate: 0.5,
     notes: "",
+    tracked_vs_sl: {},
   };
 }
 
@@ -122,6 +126,51 @@ function formatPercentPointsAvailable(ppa?: number | null): string {
     return "—";
   }
   return `${ppa.toFixed(2)}%`;
+}
+
+// ============ IN-APP MATCHUP STATS UPDATE ============
+
+// Update a player's tracked_vs_sl after a completed round
+function updatePlayerMatchupStats(
+  player: Player,
+  opponentSL: number,
+  playerWon: boolean
+): Player {
+  const slKey = String(opponentSL);
+  const current = player.tracked_vs_sl?.[slKey] ?? { matches: 0, wins: 0, win_percentage: undefined };
+  
+  const newMatches = current.matches + 1;
+  const newWins = current.wins + (playerWon ? 1 : 0);
+  const newWinPct = (newWins / newMatches) * 100;
+  
+  const newTrackedVsSL = {
+    ...player.tracked_vs_sl,
+    [slKey]: {
+      matches: newMatches,
+      wins: newWins,
+      win_percentage: newWinPct
+    }
+  };
+  
+  return {
+    ...player,
+    tracked_vs_sl: newTrackedVsSL
+  };
+}
+
+// Format tracked vs SL stats for display
+function formatTrackedVsSL(tracked?: Record<string, { matches: number; wins: number; win_percentage?: number }> | null): string {
+  if (!tracked) return "";
+  
+  const parts: string[] = [];
+  for (const sl of Object.keys(tracked).sort((a, b) => Number(a) - Number(b))) {
+    const data = tracked[sl];
+    if (data.matches > 0) {
+      const pct = data.win_percentage ?? 0;
+      parts.push(`vs SL${sl}: ${data.wins}-${data.matches - data.wins} (${pct.toFixed(0)}%)`);
+    }
+  }
+  return parts.join(" · ");
 }
 
 // ============ SCORE TRACKING TYPES ============
@@ -1320,6 +1369,29 @@ export default function Dashboard() {
     setShowRoundForm(false);
     setEditingRound(null);
     
+    // Update in-app matchup stats for both players
+    const teamAWon = round.winner === "teamA";
+    
+    // Find and update team A player's stats (vs opponent SL = teamBSkillLevel)
+    const updatedOurPlayers = stableOurTeamPlayers.map(p => {
+      if (p.id === round.teamAPlayerId) {
+        return updatePlayerMatchupStats(p, round.teamBSkillLevel, teamAWon);
+      }
+      return p;
+    });
+    
+    // Find and update team B player's stats (vs opponent SL = teamASkillLevel)
+    const updatedOppPlayers = stableOppTeamPlayers.map(p => {
+      if (p.id === round.teamBPlayerId) {
+        return updatePlayerMatchupStats(p, round.teamASkillLevel, !teamAWon);
+      }
+      return p;
+    });
+    
+    // Update the stable team rosters with new matchup data
+    setStableOurTeamPlayers(updatedOurPlayers);
+    setStableOppTeamPlayers(updatedOppPlayers);
+    
     // Recalculate live declaration flow after saving round
     recalculateDeclarationFlow();
   };
@@ -1599,6 +1671,45 @@ export default function Dashboard() {
       setStatus("Match created.");
     } catch (err: any) {
       setStatus(err?.message || "Failed to create match.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Save the current team rosters with updated matchup stats to backend
+  async function handleSaveMatchupStats() {
+    if (!matchState || stableOurTeamPlayers.length === 0 || stableOppTeamPlayers.length === 0) {
+      setStatus("No active match to save stats from.");
+      return;
+    }
+
+    setBusy(true);
+    setStatus("Saving matchup stats...");
+    
+    try {
+      // Get existing team data from backend to preserve structure
+      const ourTeamData = await fetch(`${API_BASE}/teams/${matchState.our_team.id}`).then(r => r.json());
+      const oppTeamData = await fetch(`${API_BASE}/teams/${matchState.opp_team.id}`).then(r => r.json());
+      
+      // Update with current player data (including tracked_vs_sl)
+      const updatedOurTeam = {
+        ...ourTeamData.team,
+        players: stableOurTeamPlayers
+      };
+      
+      const updatedOppTeam = {
+        ...oppTeamData.team,
+        players: stableOppTeamPlayers
+      };
+      
+      // Save both teams
+      await updateTeam(updatedOurTeam.id, updatedOurTeam);
+      await updateTeam(updatedOppTeam.id, updatedOppTeam);
+      
+      setStatus("Matchup stats saved to teams.");
+    } catch (err: any) {
+      setStatus(err?.message || "Failed to save matchup stats.");
+      console.error("Save matchup stats failed:", err);
     } finally {
       setBusy(false);
     }
@@ -2409,13 +2520,23 @@ export default function Dashboard() {
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <h3 style={{ margin: 0 }}>📋 Round History</h3>
-                <button 
-                  onClick={() => { setEditingRound(null); setShowRoundForm(true); }}
-                  disabled={scoreState.rounds.length >= 5}
-                  style={{ padding: "6px 12px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 4 }}
-                >
-                  + Add Round
-                </button>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <button 
+                    onClick={handleSaveMatchupStats}
+                    disabled={busy || scoreState.rounds.length === 0}
+                    title="Save accumulated matchup stats to teams"
+                    style={{ padding: "6px 12px", background: "#10b981", color: "#fff", border: "none", borderRadius: 4 }}
+                  >
+                    💾 Save Matchup Stats
+                  </button>
+                  <button 
+                    onClick={() => { setEditingRound(null); setShowRoundForm(true); }}
+                    disabled={scoreState.rounds.length >= 5}
+                    style={{ padding: "6px 12px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 4 }}
+                  >
+                    + Add Round
+                  </button>
+                </div>
               </div>
               
               {showRoundForm && matchState && (
