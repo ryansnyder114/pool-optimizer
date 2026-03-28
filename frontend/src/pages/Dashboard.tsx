@@ -1359,6 +1359,40 @@ export default function Dashboard() {
       return;
     }
 
+    // Validate player stats
+    for (const p of cleanedPlayers) {
+      const won = p.matches_won ?? 0;
+      const played = p.matches_played ?? 0;
+      const winPct = p.win_percentage ?? 0;
+      const ptsPerMatch = p.points_per_match ?? 0;
+      const pctAvail = p.percent_points_available ?? 0;
+
+      if (won < 0) {
+        setStatus(`${p.name}: matches_won cannot be negative.`);
+        return;
+      }
+      if (played < 0) {
+        setStatus(`${p.name}: matches_played cannot be negative.`);
+        return;
+      }
+      if (won > played) {
+        setStatus(`${p.name}: matches_won cannot exceed matches_played.`);
+        return;
+      }
+      if (winPct < 0 || winPct > 100) {
+        setStatus(`${p.name}: win_percentage must be 0-100.`);
+        return;
+      }
+      if (pctAvail < 0 || pctAvail > 100) {
+        setStatus(`${p.name}: percent_points_available must be 0-100.`);
+        return;
+      }
+      if (ptsPerMatch < 0) {
+        setStatus(`${p.name}: points_per_match cannot be negative.`);
+        return;
+      }
+    }
+
     const payload: Team = {
       ...editingTeam,
       id: editingTeam.id.trim() || `team_${Date.now()}`,
@@ -1808,6 +1842,97 @@ export default function Dashboard() {
                 placeholder="Notes"
                 rows={2}
               />
+
+              {/* APA Stats Section */}
+              <div style={{ marginTop: 12, padding: "8px 12px", background: "#f0f9ff", borderRadius: 4, border: "1px solid #bae6fd" }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: "#0369a1", marginBottom: 8 }}>
+                  APA Stats (Optional)
+                </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr 1fr", gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#475569" }}>Matches Won</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={player.matches_won ?? ""}
+                      onChange={(e) =>
+                        updateEditingPlayer(index, {
+                          matches_won: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      placeholder="0"
+                      style={{ width: "100%", fontSize: 11, padding: "4px 6px" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#475569" }}>Matches Played</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={player.matches_played ?? ""}
+                      onChange={(e) =>
+                        updateEditingPlayer(index, {
+                          matches_played: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      placeholder="0"
+                      style={{ width: "100%", fontSize: 11, padding: "4px 6px" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#475569" }}>Win %</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.01}
+                      value={player.win_percentage ?? ""}
+                      onChange={(e) =>
+                        updateEditingPlayer(index, {
+                          win_percentage: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      placeholder="0.00"
+                      style={{ width: "100%", fontSize: 11, padding: "4px 6px" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#475569" }}>Pts/Match</label>
+                    <input
+                      type="number"
+                      min={0}
+                      step={0.01}
+                      value={player.points_per_match ?? ""}
+                      onChange={(e) =>
+                        updateEditingPlayer(index, {
+                          points_per_match: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      placeholder="0.00"
+                      style={{ width: "100%", fontSize: 11, padding: "4px 6px" }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: 10, color: "#475569" }}>% Pts Avail</label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={100}
+                      step={0.01}
+                      value={player.percent_points_available ?? ""}
+                      onChange={(e) =>
+                        updateEditingPlayer(index, {
+                          percent_points_available: e.target.value === "" ? null : Number(e.target.value),
+                        })
+                      }
+                      placeholder="0.00"
+                      style={{ width: "100%", fontSize: 11, padding: "4px 6px" }}
+                    />
+                  </div>
+                </div>
+              </div>
             </div>
           ))}
 
