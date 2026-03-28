@@ -587,6 +587,14 @@ type RoundEntryFormProps = {
   usedAPlayerIds: string[];
   usedBPlayerIds: string[];
   editingRound?: Round | null;
+  prefillMatchup?: {
+    ourPlayerId: string;
+    ourPlayerName: string;
+    ourPlayerSkillLevel: number;
+    oppPlayerId: string;
+    oppPlayerName: string;
+    oppPlayerSkillLevel: number;
+  } | null;
   onSave: (round: Round) => void;
   onCancel: () => void;
 };
@@ -600,16 +608,19 @@ function RoundEntryForm({
   usedAPlayerIds, 
   usedBPlayerIds,
   editingRound,
+  prefillMatchup,
   onSave, 
   onCancel 
 }: RoundEntryFormProps) {
-  const availableAPlayers = teamAPlayers.filter(p => !usedAPlayerIds.includes(p.id) || editingRound?.teamAPlayerId === p.id);
-  const availableBPlayers = teamBPlayers.filter(p => !usedBPlayerIds.includes(p.id) || editingRound?.teamBPlayerId === p.id);
+  const isPrefilled = !!prefillMatchup;
   
-  const [teamAPlayerId, setTeamAPlayerId] = useState(editingRound?.teamAPlayerId || "");
-  const [teamBPlayerId, setTeamBPlayerId] = useState(editingRound?.teamBPlayerId || "");
-  const [teamAPoints, setTeamAPoints] = useState(editingRound?.teamAPoints ?? 2);
-  const [teamBPoints, setTeamBPoints] = useState(editingRound?.teamBPoints ?? 0);
+  const availableAPlayers = teamAPlayers.filter(p => !usedAPlayerIds.includes(p.id) || editingRound?.teamAPlayerId === p.id || prefillMatchup?.ourPlayerId === p.id);
+  const availableBPlayers = teamBPlayers.filter(p => !usedBPlayerIds.includes(p.id) || editingRound?.teamBPlayerId === p.id || prefillMatchup?.oppPlayerId === p.id);
+  
+  const [teamAPlayerId, setTeamAPlayerId] = useState(prefillMatchup?.ourPlayerId ?? editingRound?.teamAPlayerId ?? "");
+  const [teamBPlayerId, setTeamBPlayerId] = useState(prefillMatchup?.oppPlayerId ?? editingRound?.teamBPlayerId ?? "");
+  const [teamAPoints, setTeamAPoints] = useState(2);
+  const [teamBPoints, setTeamBPoints] = useState(0);
   
   // Derive winner from points
   const winner: "teamA" | "teamB" = teamAPoints > teamBPoints ? "teamA" : "teamB";
@@ -625,19 +636,26 @@ function RoundEntryForm({
     isTied ? "Scores cannot be tied - must have a winner" :
     "";
   
-  const isValid = teamAPlayerId && teamBPlayerId && pointsValid && !isTied;
+  // If prefilled matchup, players are already selected - just validate points
+  const isValid = isPrefilled ? pointsValid && !isTied : (teamAPlayerId && teamBPlayerId && pointsValid && !isTied);
   
   const handleSave = () => {
-    if (!teamAPlayer || !teamBPlayer) return;
+    // Use prefilled matchup data if available, otherwise look up from players
+    const ourPlayerName = prefillMatchup?.ourPlayerName ?? teamAPlayer?.name ?? "";
+    const ourPlayerSkillLevel = prefillMatchup?.ourPlayerSkillLevel ?? teamAPlayer?.skill_level ?? 3;
+    const oppPlayerName = prefillMatchup?.oppPlayerName ?? teamBPlayer?.name ?? "";
+    const oppPlayerSkillLevel = prefillMatchup?.oppPlayerSkillLevel ?? teamBPlayer?.skill_level ?? 3;
+    
+    if (!ourPlayerName || !oppPlayerName) return;
     
     const round: Round = {
       round: editingRound?.round ?? nextRound,
-      teamAPlayerId,
-      teamBPlayerId,
-      teamAPlayerName: teamAPlayer.name,
-      teamBPlayerName: teamBPlayer.name,
-      teamASkillLevel: teamAPlayer.skill_level,
-      teamBSkillLevel: teamBPlayer.skill_level,
+      teamAPlayerId: prefillMatchup?.ourPlayerId ?? teamAPlayerId,
+      teamBPlayerId: prefillMatchup?.oppPlayerId ?? teamBPlayerId,
+      teamAPlayerName: ourPlayerName,
+      teamBPlayerName: oppPlayerName,
+      teamASkillLevel: ourPlayerSkillLevel,
+      teamBSkillLevel: oppPlayerSkillLevel,
       winner,
       teamAPoints,
       teamBPoints,
@@ -657,42 +675,58 @@ function RoundEntryForm({
       }}
     >
       <h4 style={{ margin: "0 0 12px 0", color: "#1e40af" }}>
-        {editingRound ? `Edit Round ${editingRound.round}` : `Add Round ${nextRound}`}
+        {editingRound ? `Edit Round ${editingRound.round}` : prefillMatchup ? `Round ${nextRound}: Enter Score` : `Add Round ${nextRound}`}
       </h4>
       
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-        <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-            {teamAName} Player
-          </label>
-          <select
-            value={teamAPlayerId}
-            onChange={(e) => setTeamAPlayerId(e.target.value)}
-            style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #d1d5db" }}
-          >
-            <option value="">Select player</option>
-            {availableAPlayers.map(p => (
-              <option key={p.id} value={p.id}>{p.name} (SL{p.skill_level})</option>
-            ))}
-          </select>
+      {/* Player display - either dropdown or read-only based on whether we have prefilled matchup */}
+      {isPrefilled ? (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12, padding: "12px", background: "#dbeafe", borderRadius: 6 }}>
+          <div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>{teamAName} (First)</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#1e40af" }}>{prefillMatchup.ourPlayerName}</div>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>SL{prefillMatchup.ourPlayerSkillLevel}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 2 }}>{teamBName} (Response)</div>
+            <div style={{ fontSize: 16, fontWeight: 700, color: "#dc2626" }}>{prefillMatchup.oppPlayerName}</div>
+            <div style={{ fontSize: 13, color: "#6b7280" }}>SL{prefillMatchup.oppPlayerSkillLevel}</div>
+          </div>
         </div>
-        
-        <div>
-          <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
-            {teamBName} Player
-          </label>
-          <select
-            value={teamBPlayerId}
-            onChange={(e) => setTeamBPlayerId(e.target.value)}
-            style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #d1d5db" }}
-          >
-            <option value="">Select player</option>
-            {availableBPlayers.map(p => (
-              <option key={p.id} value={p.id}>{p.name} (SL{p.skill_level})</option>
-            ))}
-          </select>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
+          <div>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+              {teamAName} Player
+            </label>
+            <select
+              value={teamAPlayerId}
+              onChange={(e) => setTeamAPlayerId(e.target.value)}
+              style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #d1d5db" }}
+            >
+              <option value="">Select player</option>
+              {availableAPlayers.map(p => (
+                <option key={p.id} value={p.id}>{p.name} (SL{p.skill_level})</option>
+              ))}
+            </select>
+          </div>
+          
+          <div>
+            <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 4 }}>
+              {teamBName} Player
+            </label>
+            <select
+              value={teamBPlayerId}
+              onChange={(e) => setTeamBPlayerId(e.target.value)}
+              style={{ width: "100%", padding: 8, borderRadius: 4, border: "1px solid #d1d5db" }}
+            >
+              <option value="">Select player</option>
+              {availableBPlayers.map(p => (
+                <option key={p.id} value={p.id}>{p.name} (SL{p.skill_level})</option>
+              ))}
+            </select>
+          </div>
         </div>
-      </div>
+      )}
       
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
         <div>
@@ -1055,6 +1089,16 @@ export default function Dashboard() {
   const [startingDeclaringTeam, setStartingDeclaringTeam] = useState<"teamA" | "teamB">("teamA");
   const [declarationStep, setDeclarationStep] = useState<"first" | "response" | "complete">("first");
   const [firstDeclaredPlayer, setFirstDeclaredPlayer] = useState<{ id: string; name: string; team: "teamA" | "teamB" } | null>(null);
+  
+  // Pre-filled matchup from lock-in (players already selected, just need score)
+  const [lockedMatchup, setLockedMatchup] = useState<{
+    ourPlayerId: string;
+    ourPlayerName: string;
+    ourPlayerSkillLevel: number;
+    oppPlayerId: string;
+    oppPlayerName: string;
+    oppPlayerSkillLevel: number;
+  } | null>(null);
 
   // Stable team rosters - initialized once when match starts, never cleared during delete/edit
   const [stableOurTeamPlayers, setStableOurTeamPlayers] = useState<Player[]>([]);
@@ -1445,31 +1489,28 @@ export default function Dashboard() {
       return;
     }
 
-    setBusy(true);
-    setStatus("Applying matchup...");
-    try {
-      const res = await applyMatchup(
-        matchState,
-        selectedOurPlayerId,
-        selectedOppPlayerId
-      );
-      const nextState = res.state ?? res;
-      setMatchState(nextState);
-      setSelectedOurPlayerId("");
-      setSelectedOppPlayerId("");
-      setBestFirstRecs([]);
-      setBestResponseRecs([]);
-      // Reset declaration flow for next round
-      setDeclarationStep("first");
-      setFirstDeclaredPlayer(null);
-      await refreshLegalPlayers(nextState);
-      await refreshLineupStatuses(nextState);
-      setStatus(nextState.round_index !== undefined && nextState.round_index > 5 ? "Match complete." : "Matchup locked.");
-    } catch (err: any) {
-      setStatus(err?.message || "Failed to apply matchup.");
-    } finally {
-      setBusy(false);
+    // Find player details for the locked matchup
+    const ourPlayer = ourTeamPlayers.find(p => p.id === selectedOurPlayerId);
+    const oppPlayer = oppTeamPlayers.find(p => p.id === selectedOppPlayerId);
+    
+    if (!ourPlayer || !oppPlayer) {
+      setStatus("Invalid player selection.");
+      return;
     }
+
+    // Set the locked matchup - this will pre-fill the round entry form
+    setLockedMatchup({
+      ourPlayerId: ourPlayer.id,
+      ourPlayerName: ourPlayer.name,
+      ourPlayerSkillLevel: ourPlayer.skill_level,
+      oppPlayerId: oppPlayer.id,
+      oppPlayerName: oppPlayer.name,
+      oppPlayerSkillLevel: oppPlayer.skill_level,
+    });
+    
+    // Show the round entry form with pre-filled players
+    setShowRoundForm(true);
+    setStatus(`Matchup locked: ${ourPlayer.name} vs ${oppPlayer.name} — enter score`);
   }
 
   // Confirm first declaration and advance to response step
@@ -2128,8 +2169,22 @@ export default function Dashboard() {
                   usedAPlayerIds={usedAPlayerIds}
                   usedBPlayerIds={usedBPlayerIds}
                   editingRound={editingRound}
-                  onSave={handleSaveRound}
-                  onCancel={() => { setShowRoundForm(false); setEditingRound(null); }}
+                  prefillMatchup={lockedMatchup}
+                  onSave={(round) => {
+                    // Clear locked matchup after saving
+                    handleSaveRound(round);
+                    setLockedMatchup(null);
+                    // Reset selection and declaration flow
+                    setSelectedOurPlayerId("");
+                    setSelectedOppPlayerId("");
+                    setDeclarationStep("first");
+                    setFirstDeclaredPlayer(null);
+                  }}
+                  onCancel={() => { 
+                    setShowRoundForm(false); 
+                    setEditingRound(null); 
+                    setLockedMatchup(null);
+                  }}
                 />
               )}
               
@@ -2212,7 +2267,14 @@ export default function Dashboard() {
                       opacity: isDisabled ? 0.6 : 1,
                     }}
                     onClick={() => {
-                      if (!isDisabled) setSelectedOurPlayerId(p.id);
+                      if (!isDisabled) {
+                        setSelectedOurPlayerId(p.id);
+                        // Auto-advance to response step when selecting first player
+                        if (declarationStep === "first" && currentRoundDeclaringTeam === "teamA") {
+                          setFirstDeclaredPlayer({ id: p.id, name: p.name, team: "teamA" });
+                          setDeclarationStep("response");
+                        }
+                      }
                     }}
                   >
                     <strong>{p.name}</strong> (SL {p.skill_level}){" "}
@@ -2268,7 +2330,14 @@ export default function Dashboard() {
                       opacity: isDisabled ? 0.6 : 1,
                     }}
                     onClick={() => {
-                      if (!isDisabled) setSelectedOppPlayerId(p.id);
+                      if (!isDisabled) {
+                        setSelectedOppPlayerId(p.id);
+                        // Auto-advance to response step when selecting first player
+                        if (declarationStep === "first" && currentRoundDeclaringTeam === "teamB") {
+                          setFirstDeclaredPlayer({ id: p.id, name: p.name, team: "teamB" });
+                          setDeclarationStep("response");
+                        }
+                      }
                     }}
                   >
                     <strong>{p.name}</strong> (SL {p.skill_level}){" "}
@@ -2308,21 +2377,6 @@ export default function Dashboard() {
                   >
                     {currentRoundDeclaringTeam === "teamA" ? "Recommend Our Response" : "Recommend Opp Response"}
                   </button>
-                  
-                  {/* Confirm First Declaration Button */}
-                  {declarationStep === "first" && (
-                    <button
-                      onClick={handleConfirmFirstDeclaration}
-                      disabled={busy || !(currentRoundDeclaringTeam === "teamA" ? selectedOurPlayerId : selectedOppPlayerId)}
-                      style={{
-                        background: "#7c3aed",
-                        color: "#fff",
-                        border: "none",
-                      }}
-                    >
-                      Confirm First Declaration
-                    </button>
-                  )}
                   
                   <button
                     onClick={handleLockMatchup}
@@ -2591,322 +2645,6 @@ export default function Dashboard() {
                 );
               })
             )}
-          </section>
-
-          {/* Lineup Possibility Tracker */}
-          <section
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 8,
-              padding: 16,
-              marginTop: 24,
-            }}
-          >
-            <h3>Lineup Possibility Tracker</h3>
-            <p style={{ fontSize: 13, color: "#666", marginBottom: 16 }}>
-              All legal 5-player lineups. Most likely in green. Eliminated in red with strikethrough.
-              Eliminated lineups (red, strikethrough) can no longer be played.
-            </p>
-            
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-              {/* Our Team Lineups */}
-              <div>
-                <h4>{liveOurTeamName} - Our Lineups</h4>
-                
-                {/* Must Include Section */}
-                {usedAPlayerIds.length > 0 && (
-                  <div style={{ fontSize: 12, marginBottom: 8, color: "#7c3aed" }}>
-                    <strong>Must include:</strong>{" "}
-                    {usedAPlayerIds.map((pid, idx) => {
-                      const p = liveOurTeam ? findPlayer(liveOurTeam, pid) : undefined;
-                      return (
-                        <span key={pid}>
-                          {idx > 0 && ", "}
-                          {p?.name || pid} (SL{p?.skill_level})
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-                
-                {/* Summary Counts */}
-                {ourLineupStatus && (
-                  <div style={{ 
-                    fontSize: 12, 
-                    marginBottom: 10,
-                    padding: "6px 10px",
-                    borderRadius: 4,
-                    background: ourLineupStatus.active_lineups.length <= 3 ? "#fef3c7" : "#f3f4f6",
-                    border: ourLineupStatus.active_lineups.length <= 3 ? "1px solid #f59e0b" : "1px solid #e5e7eb",
-                  }}>
-                    <span style={{ color: ourLineupStatus.active_lineups.length <= 3 ? "#92400e" : "#1f2937" }}>
-                      <strong>Active:</strong> {ourLineupStatus.active_lineups.length} |{" "}
-                      <strong>Eliminated:</strong> {ourLineupStatus.eliminated_lineups.length}
-                    </span>
-                  </div>
-                )}
-                
-                {/* Lineup Pressure Indicator */}
-                {ourLineupStatus && ourLineupStatus.active_lineups.length === 1 && (
-                  <div style={{
-                    fontSize: 12,
-                    padding: "8px 12px",
-                    marginBottom: 10,
-                    borderRadius: 4,
-                    background: "#fee2e2",
-                    border: "2px solid #dc2626",
-                    color: "#991b1b",
-                    fontWeight: 700,
-                  }}>
-                    ⚠️ Only one viable lineup remains - lineup locked!
-                  </div>
-                )}
-                {ourLineupStatus && ourLineupStatus.active_lineups.length > 1 && ourLineupStatus.active_lineups.length <= 3 && (
-                  <div style={{
-                    fontSize: 12,
-                    padding: "8px 12px",
-                    marginBottom: 10,
-                    borderRadius: 4,
-                    background: "#fef3c7",
-                    border: "1px solid #f59e0b",
-                    color: "#92400e",
-                  }}>
-                    ⚠️ Limited options: {ourLineupStatus.active_lineups.length} active lineups
-                  </div>
-                )}
-                {ourLineupStatus && (
-                  <div style={{ fontSize: 13 }}>
-                    {ourLineupStatus.active_lineups.length === 0 && 
-                     ourLineupStatus.eliminated_lineups.length === 0 ? (
-                      <p>No legal lineups found.</p>
-                    ) : (
-                      <>
-                        {/* Most Likely (first) */}
-                        {ourLineupStatus.active_lineups.find(l => l.most_likely) && (
-                          <div style={{ marginBottom: 8 }}>
-                            {ourLineupStatus.active_lineups.filter(l => l.most_likely).map((lineup, idx) => (
-                              <div
-                                key={`mostlikely-${idx}`}
-                                style={{
-                                  padding: "8px 12px",
-                                  marginBottom: 4,
-                                  borderRadius: 4,
-                                  background: "#d1fae5",
-                                  border: "2px solid #10b981",
-                                  color: "#065f46",
-                                  fontWeight: 700,
-                                }}
-                              >
-                                {lineup.label}
-                                {lineup.count && lineup.count > 1 && <span style={{color: "#065f46", fontWeight: 400}}> ({lineup.count} combos)</span>}
-                                {" "}← most likely
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        
-                        {/* Remaining Active (not most likely) */}
-                        {ourLineupStatus.active_lineups.filter(l => !l.most_likely).length > 0 && (
-                          <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Other active:</div>
-                            {ourLineupStatus.active_lineups.filter(l => !l.most_likely).map((lineup, idx) => (
-                              <div
-                                key={`active-${idx}`}
-                                style={{
-                                  padding: "6px 10px",
-                                  marginBottom: 4,
-                                  borderRadius: 4,
-                                  background: "#f9fafb",
-                                  border: "1px solid #e5e7eb",
-                                  color: "#1f2937",
-                                }}
-                              >
-                                {lineup.label}
-                                {lineup.count && lineup.count > 1 && <span style={{color: "#6b7280"}}> ({lineup.count} combos)</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        
-                        {/* Eliminated */}
-                        {ourLineupStatus.eliminated_lineups.length > 0 && (
-                          <div>
-                            <div style={{ fontSize: 11, color: "#991b1b", marginBottom: 4 }}>Eliminated:</div>
-                            {ourLineupStatus.eliminated_lineups.map((lineup, idx) => (
-                              <div
-                                key={`elim-${idx}`}
-                                style={{
-                                  padding: "6px 10px",
-                                  marginBottom: 4,
-                                  borderRadius: 4,
-                                  background: "#fef2f2",
-                                  border: "1px solid #fecaca",
-                                  color: "#991b1b",
-                                  textDecoration: "line-through",
-                                  opacity: 0.7,
-                                }}
-                              >
-                                {lineup.label}
-                                {lineup.count && lineup.count > 1 && <span style={{color: "#991b1b", opacity: 0.7}}> ({lineup.count} combos)</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Opponent Team Lineups */}
-              <div>
-                <h4>{liveOppTeamName} - Opponent Lineups</h4>
-                
-                {/* Must Include Section */}
-                {usedBPlayerIds.length > 0 && (
-                  <div style={{ fontSize: 12, marginBottom: 8, color: "#7c3aed" }}>
-                    <strong>Must include:</strong>{" "}
-                    {usedBPlayerIds.map((pid, idx) => {
-                      const p = liveOppTeam ? findPlayer(liveOppTeam, pid) : undefined;
-                      return (
-                        <span key={pid}>
-                          {idx > 0 && ", "}
-                          {p?.name || pid} (SL{p?.skill_level})
-                        </span>
-                      );
-                    })}
-                  </div>
-                )}
-                
-                {/* Summary Counts */}
-                {oppLineupStatus && (
-                  <div style={{ 
-                    fontSize: 12, 
-                    marginBottom: 10,
-                    padding: "6px 10px",
-                    borderRadius: 4,
-                    background: oppLineupStatus.active_lineups.length <= 3 ? "#fef3c7" : "#f3f4f6",
-                    border: oppLineupStatus.active_lineups.length <= 3 ? "1px solid #f59e0b" : "1px solid #e5e7eb",
-                  }}>
-                    <span style={{ color: oppLineupStatus.active_lineups.length <= 3 ? "#92400e" : "#1f2937" }}>
-                      <strong>Active:</strong> {oppLineupStatus.active_lineups.length} |{" "}
-                      <strong>Eliminated:</strong> {oppLineupStatus.eliminated_lineups.length}
-                    </span>
-                  </div>
-                )}
-                
-                {/* Lineup Pressure Indicator */}
-                {oppLineupStatus && oppLineupStatus.active_lineups.length === 1 && (
-                  <div style={{
-                    fontSize: 12,
-                    padding: "8px 12px",
-                    marginBottom: 10,
-                    borderRadius: 4,
-                    background: "#fee2e2",
-                    border: "2px solid #dc2626",
-                    color: "#991b1b",
-                    fontWeight: 700,
-                  }}>
-                    ⚠️ Only one viable lineup remains - lineup locked!
-                  </div>
-                )}
-                {oppLineupStatus && oppLineupStatus.active_lineups.length > 1 && oppLineupStatus.active_lineups.length <= 3 && (
-                  <div style={{
-                    fontSize: 12,
-                    padding: "8px 12px",
-                    marginBottom: 10,
-                    borderRadius: 4,
-                    background: "#fef3c7",
-                    border: "1px solid #f59e0b",
-                    color: "#92400e",
-                  }}>
-                    ⚠️ Limited options: {oppLineupStatus.active_lineups.length} active lineups
-                  </div>
-                )}
-                {oppLineupStatus && (
-                  <div style={{ fontSize: 13 }}>
-                    {oppLineupStatus.active_lineups.length === 0 && 
-                     oppLineupStatus.eliminated_lineups.length === 0 ? (
-                      <p>No legal lineups found.</p>
-                    ) : (
-                      <>
-                        {/* Most Likely (first) */}
-                        {oppLineupStatus.active_lineups.find(l => l.most_likely) && (
-                          <div style={{ marginBottom: 8 }}>
-                            {oppLineupStatus.active_lineups.filter(l => l.most_likely).map((lineup, idx) => (
-                              <div
-                                key={`mostlikely-${idx}`}
-                                style={{
-                                  padding: "8px 12px",
-                                  marginBottom: 4,
-                                  borderRadius: 4,
-                                  background: "#d1fae5",
-                                  border: "2px solid #10b981",
-                                  color: "#065f46",
-                                  fontWeight: 700,
-                                }}
-                              >
-                                {lineup.label}
-                                {lineup.count && lineup.count > 1 && <span style={{color: "#065f46", fontWeight: 400}}> ({lineup.count} combos)</span>}
-                                {" "}← most likely
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        
-                        {/* Remaining Active (not most likely) */}
-                        {oppLineupStatus.active_lineups.filter(l => !l.most_likely).length > 0 && (
-                          <div style={{ marginBottom: 12 }}>
-                            <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 4 }}>Other active:</div>
-                            {oppLineupStatus.active_lineups.filter(l => !l.most_likely).map((lineup, idx) => (
-                              <div
-                                key={`active-${idx}`}
-                                style={{
-                                  padding: "6px 10px",
-                                  marginBottom: 4,
-                                  borderRadius: 4,
-                                  background: "#f9fafb",
-                                  border: "1px solid #e5e7eb",
-                                  color: "#1f2937",
-                                }}
-                              >
-                                {lineup.label}
-                                {lineup.count && lineup.count > 1 && <span style={{color: "#6b7280"}}> ({lineup.count} combos)</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        
-                        {/* Eliminated */}
-                        {oppLineupStatus.eliminated_lineups.length > 0 && (
-                          <div>
-                            <div style={{ fontSize: 11, color: "#991b1b", marginBottom: 4 }}>Eliminated:</div>
-                            {oppLineupStatus.eliminated_lineups.map((lineup, idx) => (
-                              <div
-                                key={`elim-${idx}`}
-                                style={{
-                                  padding: "6px 10px",
-                                  marginBottom: 4,
-                                  borderRadius: 4,
-                                  background: "#fef2f2",
-                                  border: "1px solid #fecaca",
-                                  color: "#991b1b",
-                                  textDecoration: "line-through",
-                                  opacity: 0.7,
-                                }}
-                              >
-                                {lineup.label}
-                                {lineup.count && lineup.count > 1 && <span style={{color: "#991b1b", opacity: 0.7}}> ({lineup.count} combos)</span>}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
           </section>
         </>
       )}
