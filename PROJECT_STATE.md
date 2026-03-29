@@ -228,3 +228,107 @@ Implementation notes:
 - Uses stable live rosters as the active-match trigger
 - Uses a ref guard so auto-collapse happens once per match session
 - No backend changes
+
+
+## Match Setup Simplification
+
+Declaration pattern is no longer manually selected during match setup.
+
+Instead:
+- Selecting who puts up first automatically determines the declaration pattern
+- If our team starts: first / response / first / response / first
+- If opponent starts: response / first / response / first / response
+
+Design intent:
+- reduce setup clutter
+- remove redundant choices
+- prevent conflicting match-start inputs
+
+## Match Setup Simplification
+
+Removed the separate "Declaration Pattern" selector from match setup.
+
+Current behavior:
+- The user only selects who starts Round 1
+- Declaration pattern is automatically derived from that choice
+
+Derived patterns:
+- Our Team starts → `["us", "opp", "us", "opp", "us"]`
+- Opponent starts → `["opp", "us", "opp", "us", "opp"]`
+
+Design intent:
+- reduce setup clutter
+- remove redundant choices
+- prevent conflicting inputs
+- preserve the exact existing alternating live-match flow
+
+#### UI Upgrade: Start Matchup Button Emphasis
+
+Improved the visual prominence of the "Start Matchup" button to make it clearly stand out as the primary action during match flow.
+
+### Changes
+
+* Increased button size (padding and font size)
+* Applied stronger visual weight (bold text, improved contrast)
+* Added subtle shadow for depth
+* Improved spacing around the button to reduce clutter
+* Enhanced hover/focus states for better feedback
+* Optional icon/prefix added for clarity (e.g., ▶)
+
+### Behavior
+
+* No changes to button logic or functionality
+* Enabled/disabled states remain unchanged
+* Disabled styling improved to remain readable and intentional
+
+### Design Intent
+
+* Make the primary action immediately recognizable during live use
+* Improve speed and confidence in match flow decisions
+* Reduce visual ambiguity between primary and secondary actions
+* Maintain a clean, non-flashy, captain-friendly interface
+
+
+#### UI Upgrade: Action Button Hierarchy
+
+Improved button hierarchy across the live match flow so the next important action is easier to find quickly during match play.
+
+### Primary CTA Buttons
+
+The following buttons now use stronger visual emphasis:
+
+* **Start Matchup** (blue primary setup action)
+* **Lock Matchup** (green primary live-flow action)
+* **Save Round / Update Round** (green primary completion action)
+
+### Styling Direction
+
+Primary action buttons now use:
+
+* larger padding
+* larger font size
+* bold text
+* stronger border radius
+* high-contrast background color
+* subtle shadow
+* clearer visual separation from secondary/tertiary buttons
+* optional icon/prefix for faster recognition
+
+### Visual Hierarchy
+
+* **Primary CTA**: strongest emphasis for actions that advance the match
+* **Secondary**: moderate emphasis for useful but non-critical actions
+* **Tertiary**: subdued utility controls (cancel, edit, delete, sample/demo actions)
+
+### Design Intent
+
+* Make the next action obvious during live use
+* Improve scan speed and confidence under match pressure
+* Reduce visual competition between critical and non-critical controls
+* Keep the interface polished, practical, and captain-friendly
+
+### Behavior
+
+* No button logic was changed
+* Existing enabled/disabled behavior was preserved
+* This was a styling and usability upgrade only

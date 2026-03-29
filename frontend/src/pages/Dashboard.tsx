@@ -1043,19 +1043,32 @@ function RoundEntryForm({
           onClick={handleSave}
           disabled={!isValid}
           style={{ 
-            padding: "8px 16px", 
-            background: isValid ? "#10b981" : "#9ca3af", 
+            padding: "12px 24px",
+            fontSize: 15,
+            fontWeight: 700,
+            borderRadius: 8,
+            background: !isValid ? "#9ca3af" : "#10b981",
             color: "#fff", 
             border: "none", 
-            borderRadius: 4,
-            cursor: isValid ? "pointer" : "not-allowed"
+            cursor: !isValid ? "not-allowed" : "pointer",
+            boxShadow: !isValid ? "none" : "0 2px 4px rgba(16, 185, 129, 0.3)",
+            transition: "all 0.15s ease",
           }}
         >
-          {editingRound ? "Update Round" : "Save Round"}
+          {editingRound ? "✓ Update Round" : "✓ Save Round"}
         </button>
         <button 
           onClick={onCancel}
-          style={{ padding: "8px 16px", background: "#fff", border: "1px solid #d1d5db", borderRadius: 4 }}
+          style={{ 
+            padding: "10px 16px",
+            fontSize: 14,
+            fontWeight: 500,
+            borderRadius: 6,
+            background: "#fff",
+            color: "#6b7280",
+            border: "1px solid #d1d5db",
+            cursor: "pointer",
+          }}
         >
           Cancel
         </button>
@@ -1328,13 +1341,13 @@ export default function Dashboard() {
 
   const [ourTeamId, setOurTeamId] = useState("");
   const [oppTeamId, setOppTeamId] = useState("");
-  const [firstDeclaPattern, setFirstDeclaPattern] = useState<("us" | "opp")[]>([
-    "us",
-    "opp",
-    "us",
-    "opp",
-    "us",
-  ]);
+
+  const [startingDeclaringTeam, setStartingDeclaringTeam] = useState<"teamA" | "teamB">("teamA");
+
+  // Derive declaration pattern from who starts first
+  const firstDeclaPattern: ("us" | "opp")[] = startingDeclaringTeam === "teamA" 
+    ? ["us", "opp", "us", "opp", "us"]
+    : ["opp", "us", "opp", "us", "opp"];
 
   const [matchState, setMatchState] = useState<MatchState | null>(null);
   const [ourLegalPlayers, setOurLegalPlayers] = useState<Player[]>([]);
@@ -1364,7 +1377,6 @@ export default function Dashboard() {
   const [editingRound, setEditingRound] = useState<Round | null>(null);
 
   // Round declaration flow state
-  const [startingDeclaringTeam, setStartingDeclaringTeam] = useState<"teamA" | "teamB">("teamA");
   const [declarationStep, setDeclarationStep] = useState<"first" | "response" | "complete">("first");
   const [firstDeclaredPlayer, setFirstDeclaredPlayer] = useState<{ id: string; name: string; team: "teamA" | "teamB" } | null>(null);
   
@@ -2348,20 +2360,6 @@ export default function Dashboard() {
           </label>
 
           <label>
-            Declaration Pattern
-            <select
-              style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
-              value={firstDeclaPattern.join(",")}
-              onChange={(e) =>
-                setFirstDeclaPattern(e.target.value.split(",") as ("us" | "opp")[])
-              }
-            >
-              <option value="us,opp,us,opp,us">Us first: 1,3,5</option>
-              <option value="opp,us,opp,us,opp">Opponent first: 1,3,5</option>
-            </select>
-          </label>
-
-          <label>
             Round 1 Starts With
             <select
               style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
@@ -2373,11 +2371,39 @@ export default function Dashboard() {
             </select>
           </label>
 
-          <button onClick={handleCreateMatch} disabled={busy}>
-            Start Matchup
+          <button 
+            onClick={handleCreateMatch} 
+            disabled={busy}
+            style={{
+              padding: "12px 24px",
+              fontSize: 16,
+              fontWeight: 700,
+              borderRadius: 8,
+              background: busy ? "#9ca3af" : "#2563eb",
+              color: "#fff",
+              border: "none",
+              cursor: busy ? "not-allowed" : "pointer",
+              boxShadow: busy ? "none" : "0 2px 4px rgba(37, 99, 235, 0.3)",
+              transition: "all 0.15s ease",
+            }}
+          >
+            ▶ Start Matchup
           </button>
 
-          <button onClick={handleLoadSample} disabled={busy}>
+          <button 
+            onClick={handleLoadSample} 
+            disabled={busy}
+            style={{
+              padding: "10px 16px",
+              fontSize: 14,
+              fontWeight: 500,
+              borderRadius: 6,
+              background: "#fff",
+              color: "#6b7280",
+              border: "1px solid #d1d5db",
+              cursor: busy ? "not-allowed" : "pointer",
+            }}
+          >
             Load Sample
           </button>
         </div>
@@ -2922,8 +2948,20 @@ export default function Dashboard() {
                   <button
                     onClick={handleLockMatchup}
                     disabled={busy || !selectedOurPlayerId || !selectedOppPlayerId}
+                    style={{
+                      padding: "12px 20px",
+                      fontSize: 15,
+                      fontWeight: 700,
+                      borderRadius: 8,
+                      background: (busy || !selectedOurPlayerId || !selectedOppPlayerId) ? "#9ca3af" : "#10b981",
+                      color: "#fff",
+                      border: "none",
+                      cursor: (busy || !selectedOurPlayerId || !selectedOppPlayerId) ? "not-allowed" : "pointer",
+                      boxShadow: (busy || !selectedOurPlayerId || !selectedOppPlayerId) ? "none" : "0 2px 4px rgba(16, 185, 129, 0.3)",
+                      transition: "all 0.15s ease",
+                    }}
                   >
-                    Lock Matchup
+                    🔒 Lock Matchup
                   </button>
                 </div>
 
