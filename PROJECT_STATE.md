@@ -371,3 +371,58 @@ Prediction text now uses:
 * Keep prediction text aligned with actual declaration flow
 * Make recommendation wording easier to trust and scan during live match use
 * Preserve all existing prediction and scoring logic
+
+## UI Upgrade: Live Step Indicator
+
+Added a live step indicator to the match dashboard to make the current action more obvious during live match flow.
+
+### Purpose
+
+* Guide the captain to the next action quickly
+* Reduce confusion during live match use
+* Improve scan speed without changing workflow behavior
+
+### Step Flow
+
+The indicator shows the current live match stage across this sequence:
+
+1. Select Players
+2. Lock Matchup
+3. Enter Score
+4. Save Round
+5. Next Round
+
+### Derived Step Logic
+
+The current step is derived from existing frontend state in `Dashboard.tsx`:
+
+* `editingRound` → **Editing Round** (special override state)
+* `showRoundForm && lockedMatchup` → **Enter Score**
+* `lockedMatchup && !showRoundForm` → **Save Round** or **Next Round** depending on current state
+* `selectedOurPlayerId && selectedOppPlayerId` → **Lock Matchup**
+* `scoreState.rounds.length > 0` with no current selection → **Next Round**
+* otherwise → **Select Players**
+
+### State Signals Used
+
+* `selectedOurPlayerId`
+* `selectedOppPlayerId`
+* `lockedMatchup`
+* `showRoundForm`
+* `editingRound`
+* `scoreState.rounds`
+* `scoreState.status`
+
+### Visual Behavior
+
+* **Active step**: blue background, white text
+* **Completed steps**: green background
+* **Future steps**: subdued gray
+* **Editing Round**: special amber warning state
+
+### Design Intent
+
+* Use existing frontend-derived state as the source of truth
+* Keep guidance visible but lightweight
+* Improve live usability without turning the app into a wizard
+* Preserve all existing match flow, recommendation, and scoring logic

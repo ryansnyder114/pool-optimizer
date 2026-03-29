@@ -1344,6 +1344,83 @@ function LineupTrackerPanel({ teamName, lineupStatus, usedPlayerIds, players }: 
   );
 }
 
+// ============ LIVE STEP INDICATOR HELPER ============
+
+type LiveStep = "select_players" | "lock_matchup" | "enter_score" | "save_round" | "next_round" | "editing";
+
+function getLiveStepState(params: {
+  editingRound: Round | null;
+  lockedMatchup: { ourPlayerId: string; ourPlayerName: string; ourPlayerSkillLevel: number; oppPlayerId: string; oppPlayerName: string; oppPlayerSkillLevel: number; } | null;
+  showRoundForm: boolean;
+  selectedOurPlayerId: string;
+  selectedOppPlayerId: string;
+  scoreState: ScoreState;
+}): LiveStep {
+  const { editingRound, lockedMatchup, showRoundForm, selectedOurPlayerId, selectedOppPlayerId, scoreState } = params;
+  
+  // Editing mode takes priority
+  if (editingRound) {
+    return "editing";
+  }
+  
+  // If round form is showing with a locked matchup, we're entering score
+  if (showRoundForm && lockedMatchup) {
+    return "enter_score";
+  }
+  
+  // If matchup is locked and form is closed, ready to save (or was just saved)
+  if (lockedMatchup && !showRoundForm) {
+    // Check if we have any rounds in progress or just completed
+    if (scoreState.rounds.length > 0 || scoreState.status !== "in_progress") {
+      return "next_round";
+    }
+    return "save_round";
+  }
+  
+  // If both players selected but not locked yet
+  if (selectedOurPlayerId && selectedOppPlayerId) {
+    return "lock_matchup";
+  }
+  
+  // If we have completed rounds and no active selection, we're waiting for next round
+  if (scoreState.rounds.length > 0) {
+    return "next_round";
+  }
+  
+  // Otherwise, still selecting players
+  return "select_players";
+}
+
+const STEP_LABELS: Record<LiveStep, string> = {
+  select_players: "1 Select Players",
+  lock_matchup: "2 Lock Matchup",
+  enter_score: "3 Enter Score",
+  save_round: "4 Save Round",
+  next_round: "5 Next Round",
+  editing: "Editing Round",
+};
+
+function getStepStyle(step: LiveStep, currentStep: LiveStep): { bg: string; color: string; border: string; fontWeight: string } {
+  const isActive = step === currentStep;
+  const isCompleted = STEP_ORDER.indexOf(step) < STEP_ORDER.indexOf(currentStep) && step !== "editing";
+  const isEditing = currentStep === "editing";
+  
+  if (isEditing && step === "editing") {
+    return { bg: "#fef3c7", color: "#92400e", border: "#f59e0b", fontWeight: "700" };
+  }
+  if (isActive) {
+    return { bg: "#3b82f6", color: "#fff", border: "#2563eb", fontWeight: "700" };
+  }
+  if (isCompleted) {
+    return { bg: "#d1fae5", color: "#065f46", border: "#10b981", fontWeight: "600" };
+  }
+  return { bg: "#f3f4f6", color: "#6b7280", border: "#d1d5db", fontWeight: "400" };
+}
+
+const STEP_ORDER: LiveStep[] = ["select_players", "lock_matchup", "enter_score", "save_round", "next_round"];
+
+// ============ MAIN DASHBOARD COMPONENT ============
+
 export default function Dashboard() {
   const [teams, setTeams] = useState<Team[]>([]);
   const [loadingTeams, setLoadingTeams] = useState(false);
@@ -2489,6 +2566,88 @@ export default function Dashboard() {
                  declarationStep === "response" ? "WAITING FOR RESPONSE" : "ROUND COMPLETE"}
               </div>
             </div>
+
+            {/* Live Step Indicator */}
+            {(() => {
+              const currentStep = getLiveStepState({
+                editingRound,
+                lockedMatchup,
+                showRoundForm,
+                selectedOurPlayerId,
+                selectedOppPlayerId,
+                scoreState,
+              });
+              
+              // Special display for editing mode
+              if (currentStep === "editing" && editingRound) {
+                return (
+                  <div style={{ 
+                    marginTop: 16, 
+                    padding: "12px 16px", 
+                    background: "#fef3c7", 
+                    borderRadius: 8,
+                    border: "2px solid #f59e0b"
+                  }}>
+                    <div style={{ fontSize: 11, color: "#92400e", marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                      🔧 Editing Round {editingRound.round}
+                    </div>
+                    <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <div style={{
+                        padding: "6px 12px",
+                        borderRadius: 6,
+                        fontSize: 12,
+                        background: "#fef3c7",
+                        color: "#92400e",
+                        border: "2px solid #f59e0b",
+                        fontWeight: "700",
+                        whiteSpace: "nowrap",
+                      }}>
+                        {STEP_LABELS.editing}
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+              
+              return (
+                <div style={{ 
+                  marginTop: 16, 
+                  padding: "12px 16px", 
+                  background: "#fafafa", 
+                  borderRadius: 8,
+                  border: "1px solid #e5e7eb"
+                }}>
+                  <div style={{ fontSize: 11, color: "#6b7280", marginBottom: 8, fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                    Live Progress
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap" }}>
+                    {STEP_ORDER.map((step, idx) => {
+                      const style = getStepStyle(step, currentStep);
+                      return (
+                        <React.Fragment key={step}>
+                          <div style={{
+                            padding: "6px 12px",
+                            borderRadius: 6,
+                            fontSize: 12,
+                            background: style.bg,
+                            color: style.color,
+                            border: `1px solid ${style.border}`,
+                            fontWeight: style.fontWeight,
+                            whiteSpace: "nowrap",
+                            transition: "all 0.15s ease",
+                          }}>
+                            {STEP_LABELS[step]}
+                          </div>
+                          {idx < STEP_ORDER.length - 1 && (
+                            <span style={{ color: "#9ca3af", fontSize: 14, margin: "0 2px" }}>→</span>
+                          )}
+                        </React.Fragment>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
           </section>
 
           {/* PREDICTION PANEL */}
