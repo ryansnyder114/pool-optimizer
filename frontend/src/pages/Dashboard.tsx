@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import {
   getTeams,
   createTeam,
@@ -14,6 +14,97 @@ import {
   type Lineup,
   API_BASE,
 } from "../api";
+
+// ============ LOCAL STORAGE RECOVERY ============
+
+const RECOVERY_KEY = "pool_optimizer_live_match_recovery";
+const RECOVERY_VERSION = 1;
+
+type RecoveryPayload = {
+  version: number;
+  savedAt: number;
+  data: {
+    // Team selections
+    ourTeamId: string;
+    oppTeamId: string;
+    startingDeclaringTeam: "teamA" | "teamB";
+    // Stable rosters (persist across delete/edit)
+    stableOurTeamPlayers: Player[];
+    stableOppTeamPlayers: Player[];
+    stableOurTeamName: string;
+    stableOppTeamName: string;
+    // Score state
+    scoreState: ScoreState;
+    // Live match flow
+    selectedOurPlayerId: string;
+    selectedOppPlayerId: string;
+    declarationStep: "first" | "response" | "complete";
+    firstDeclaredPlayer: { id: string; name: string; team: "teamA" | "teamB" } | null;
+    lockedMatchup: {
+      ourPlayerId: string;
+      ourPlayerName: string;
+      ourPlayerSkillLevel: number;
+      oppPlayerId: string;
+      oppPlayerName: string;
+      oppPlayerSkillLevel: number;
+    } | null;
+    showRoundForm: boolean;
+    editingRound: Round | null;
+    // Match state (minimal)
+    matchState: MatchState | null;
+  };
+};
+
+function saveRecovery(data: RecoveryPayload["data"]): void {
+  try {
+    const payload: RecoveryPayload = {
+      version: RECOVERY_VERSION,
+      savedAt: Date.now(),
+      data,
+    };
+    localStorage.setItem(RECOVERY_KEY, JSON.stringify(payload));
+  } catch (e) {
+    console.warn("Failed to save recovery data:", e);
+  }
+}
+
+function loadRecovery(): RecoveryPayload["data"] | null {
+  try {
+    const raw = localStorage.getItem(RECOVERY_KEY);
+    if (!raw) return null;
+    
+    const payload: RecoveryPayload = JSON.parse(raw);
+    
+    // Version check
+    if (payload.version !== RECOVERY_VERSION) {
+      console.warn("Recovery payload version mismatch, clearing");
+      localStorage.removeItem(RECOVERY_KEY);
+      return null;
+    }
+    
+    // Basic shape validation
+    if (!payload.data || typeof payload.data !== "object") {
+      localStorage.removeItem(RECOVERY_KEY);
+      return null;
+    }
+    
+    return payload.data;
+  } catch (e) {
+    console.warn("Failed to load recovery data:", e);
+    try {
+      localStorage.removeItem(RECOVERY_KEY);
+    } catch {}
+    return null;
+  }
+}
+
+function clearRecovery(): void {
+  try {
+    localStorage.removeItem(RECOVERY_KEY);
+  } catch (e) {
+    console.warn("Failed to clear recovery data:", e);
+  }
+}
 
 type Player = {
   id: string;
@@ -1426,6 +1517,10 @@ export default function Dashboard() {
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [teamError, setTeamError] = useState("");
 
+  // Recovery state
+  const [showRecoveryPrompt, setShowRecoveryPrompt] = useState(false);
+  const [recoveryData, setRecoveryData] = useState<ReturnType<typeof loadRecovery> | null>(null);
+
   // Collapse state for team management sections
   const [showSavedTeams, setShowSavedTeams] = useState(true);
   const [showCreateTeam, setShowCreateTeam] = useState(true);
@@ -1684,6 +1779,77 @@ export default function Dashboard() {
     loadTeams();
   }, []);
 
+  // Check for recovery data on mount
+  useEffect(() => {
+    const saved = loadRecovery();
+    if (saved && saved.stableOurTeamPlayers?.length > 0 && saved.stableOppTeamPlayers?.length > 0) {
+      setRecoveryData(saved);
+      setShowRecoveryPrompt(true);
+    }
+  }, []);
+
+  // Auto-save live match state to localStorage
+  useEffect(() => {
+    // Only save if we have an active match (players loaded)
+    if (stableOurTeamPlayers.length === 0 && stableOppTeamPlayers.length === 0) {
+      return;
+    }
+    
+    // Don't save if match is complete
+    if (scoreState.status === "complete" || scoreState.status === "clinched") {
+      return;
+    }
+
+    const data: RecoveryPayload["data"] = {
+      ourTeamId,
+      oppTeamId,
+      startingDeclaringTeam,
+      stableOurTeamPlayers,
+      stableOppTeamPlayers,
+      stableOurTeamName,
+      stableOppTeamName,
+      scoreState,
+      selectedOurPlayerId,
+      selectedOppPlayerId,
+      declarationStep,
+      firstDeclaredPlayer,
+      lockedMatchup,
+      showRoundForm,
+      editingRound,
+      matchState,
+    };
+
+    const timeoutId = setTimeout(() => {
+      saveRecovery(data);
+    }, 500); // Debounce saves by 500ms
+
+    return () => clearTimeout(timeoutId);
+  }, [
+    ourTeamId,
+    oppTeamId,
+    startingDeclaringTeam,
+    stableOurTeamPlayers,
+    stableOppTeamPlayers,
+    stableOurTeamName,
+    stableOppTeamName,
+    scoreState,
+    selectedOurPlayerId,
+    selectedOppPlayerId,
+    declarationStep,
+    firstDeclaredPlayer,
+    lockedMatchup,
+    showRoundForm,
+    editingRound,
+    matchState,
+  ]);
+
+  // Clear recovery when match completes
+  useEffect(() => {
+    if (scoreState.status === "complete" || scoreState.status === "clinched") {
+      clearRecovery();
+    }
+  }, [scoreState.status]);
+
   // Auto-collapse team sections when entering active match mode
   useEffect(() => {
     const hasLiveRoster = stableOurTeamPlayers.length > 0 && stableOppTeamPlayers.length > 0;
@@ -1893,6 +2059,8 @@ export default function Dashboard() {
       setStableOppTeamPlayers(state.opp_team.players);
       setStableOurTeamName(state.our_team.name);
       setStableOppTeamName(state.opp_team.name);
+      // Clear any old recovery data when starting fresh
+      clearRecovery();
       setBestFirstRecs([]);
       setBestResponseRecs([]);
       setSelectedOurPlayerId("");
@@ -1909,6 +2077,52 @@ export default function Dashboard() {
       setBusy(false);
     }
   }
+
+  // Resume match from recovery data
+  const handleResumeMatch = useCallback(() => {
+    if (!recoveryData) return;
+
+    setOurTeamId(recoveryData.ourTeamId || "");
+    setOppTeamId(recoveryData.oppTeamId || "");
+    setStartingDeclaringTeam(recoveryData.startingDeclaringTeam || "teamA");
+    setStableOurTeamPlayers(recoveryData.stableOurTeamPlayers || []);
+    setStableOppTeamPlayers(recoveryData.stableOppTeamPlayers || []);
+    setStableOurTeamName(recoveryData.stableOurTeamName || "Our Team");
+    setStableOppTeamName(recoveryData.stableOppTeamName || "Opponent");
+    setScoreState(recoveryData.scoreState || {
+      raceTo: RACE_TO,
+      rounds: [],
+      teamAScore: 0,
+      teamBScore: 0,
+      status: "in_progress",
+    });
+    setSelectedOurPlayerId(recoveryData.selectedOurPlayerId || "");
+    setSelectedOppPlayerId(recoveryData.selectedOppPlayerId || "");
+    setDeclarationStep(recoveryData.declarationStep || "first");
+    setFirstDeclaredPlayer(recoveryData.firstDeclaredPlayer || null);
+    setLockedMatchup(recoveryData.lockedMatchup || null);
+    setShowRoundForm(recoveryData.showRoundForm || false);
+    setEditingRound(recoveryData.editingRound || null);
+    setMatchState(recoveryData.matchState || null);
+
+    // Refresh legal players and lineup status
+    if (recoveryData.matchState) {
+      refreshLegalPlayers(recoveryData.matchState);
+      refreshLineupStatuses(recoveryData.matchState);
+    }
+
+    setShowRecoveryPrompt(false);
+    setRecoveryData(null);
+    setStatus("Match resumed from recovery");
+  }, [recoveryData]);
+
+  // Discard recovery data
+  const handleDiscardRecovery = useCallback(() => {
+    clearRecovery();
+    setShowRecoveryPrompt(false);
+    setRecoveryData(null);
+    setStatus("Recovery data cleared");
+  }, []);
 
   // Save the current team rosters with updated matchup stats to backend
   async function handleSaveMatchupStats() {
@@ -2074,6 +2288,72 @@ export default function Dashboard() {
         margin: "0 auto",
       }}
     >
+      {/* Recovery Prompt Banner */}
+      {showRecoveryPrompt && recoveryData && (
+        <div
+          style={{
+            marginBottom: 20,
+            padding: "16px 20px",
+            background: "#fef3c7",
+            borderRadius: 8,
+            border: "2px solid #f59e0b",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: 12,
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span style={{ fontSize: 24 }}>🔄</span>
+            <div>
+              <div style={{ fontWeight: 700, color: "#92400e", fontSize: 15 }}>
+                Resume saved match?
+              </div>
+              <div style={{ fontSize: 13, color: "#78350f" }}>
+                A match was in progress with {recoveryData.stableOurTeamName} vs {recoveryData.stableOppTeamName}
+                {recoveryData.scoreState?.rounds?.length > 0 && (
+                  <span> • {recoveryData.scoreState.rounds.length} round{recoveryData.scoreState.rounds.length !== 1 ? "s" : ""} completed</span>
+                )}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button
+              onClick={handleResumeMatch}
+              style={{
+                padding: "10px 20px",
+                fontSize: 14,
+                fontWeight: 700,
+                borderRadius: 6,
+                background: "#10b981",
+                color: "#fff",
+                border: "none",
+                cursor: "pointer",
+                boxShadow: "0 2px 4px rgba(16, 185, 129, 0.3)",
+              }}
+            >
+              ✓ Resume
+            </button>
+            <button
+              onClick={handleDiscardRecovery}
+              style={{
+                padding: "10px 16px",
+                fontSize: 14,
+                fontWeight: 500,
+                borderRadius: 6,
+                background: "#fff",
+                color: "#6b7280",
+                border: "1px solid #d1d5db",
+                cursor: "pointer",
+              }}
+            >
+              Discard
+            </button>
+          </div>
+        </div>
+      )}
+
       <h1>APA Pool Matchup Optimizer</h1>
 
       <div

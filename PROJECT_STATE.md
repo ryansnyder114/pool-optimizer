@@ -426,3 +426,80 @@ The current step is derived from existing frontend state in `Dashboard.tsx`:
 * Keep guidance visible but lightweight
 * Improve live usability without turning the app into a wizard
 * Preserve all existing match flow, recommendation, and scoring logic
+
+
+## Reliability Upgrade: Auto-Save / Recovery
+
+Added browser-local auto-save and recovery for live match state to protect against refreshes, accidental tab closes, or app restarts during live use.
+
+### Recovery Storage
+
+Uses `localStorage` with key:
+
+`pool_optimizer_live_match_recovery`
+
+### Recovery Payload
+
+Saved payload structure:
+
+```ts
+{
+  version: 1,
+  savedAt: <timestamp>,
+  data: {
+    ourTeamId,
+    oppTeamId,
+    startingDeclaringTeam,
+    stableOurTeamPlayers,
+    stableOppTeamPlayers,
+    stableOurTeamName,
+    stableOppTeamName,
+    scoreState,
+    selectedOurPlayerId,
+    selectedOppPlayerId,
+    declarationStep,
+    firstDeclaredPlayer,
+    lockedMatchup,
+    showRoundForm,
+    editingRound,
+    matchState
+  }
+}
+```
+
+### Auto-Save Behavior
+
+* Auto-saves meaningful live match state with a 500ms debounce
+* Saves when team selection, live rosters, score state, player selection, declaration flow, or round form state changes
+* Uses try/catch protection around localStorage operations
+
+### Recovery UX
+
+On app load, if valid recovery data exists:
+
+* show a recovery prompt/banner
+* allow user to **Resume** saved match
+* allow user to **Discard** saved match
+
+Recovery is not applied silently in v1.
+
+### Clearing Recovery Data
+
+Recovery data is cleared when:
+
+* a new match is started
+* the match reaches `complete` or `clinched`
+* the user explicitly discards recovery data
+
+### Safety Notes
+
+* version validation included
+* invalid/corrupted payloads are ignored and cleared safely
+* recovery is designed as a local-first reliability feature, not a backend persistence rewrite
+
+### Design Intent
+
+* protect live match progress
+* reduce risk during real match use
+* keep implementation lightweight and frontend-driven
+* preserve existing recommendation, scoring, and match-flow behavior
