@@ -332,3 +332,42 @@ Primary action buttons now use:
 * No button logic was changed
 * Existing enabled/disabled behavior was preserved
 * This was a styling and usability upgrade only
+
+
+## UI Fix: Context-Aware Prediction Wording
+
+Fixed prediction/recommendation wording so labels correctly reflect both:
+
+1. who starts the sequence
+2. which team owns the predicted follow-up player
+
+### Problem
+
+The previous wording assumed the follow-up label from the wrong team perspective in some cases.
+
+Example of broken output:
+
+* "If we put up Mike (SL5)..."
+* "Our response: Alex (SL6)"
+
+This was incorrect because Alex was the opponent player.
+
+### Fix
+
+Prediction text now uses:
+
+* the acting team for the first label
+* the predicted player's team ownership for the second label
+
+### Correct behavior
+
+* If we declare first → "If we put up..." / "Their response:"
+* If opponent declares first → "If opponent puts up..." / "Our response:"
+* If we respond → "If we respond with..." / "Their next lead:"
+* If opponent responds → "If opponent responds with..." / "Our next lead:"
+
+### Design Intent
+
+* Keep prediction text aligned with actual declaration flow
+* Make recommendation wording easier to trust and scan during live match use
+* Preserve all existing prediction and scoring logic

@@ -614,8 +614,12 @@ function getPredictionAdvice(
   teamBContext: ScoreContext,
   firstDeclaredPlayer?: { id: string; name: string; team: "teamA" | "teamB" } | null
 ): React.ReactNode {
+  // Determine who "we" are in this context
+  const weAreTeamA = currentRoundDeclaringTeam === "teamA";
+  const theyAreTeamA = !weAreTeamA;
+  
   if (mode === "first") {
-    // Predicting their first play, show our recommended response
+    // Predicting first declaration - show what the declaring team might do and how the other team should respond
     const predictingForTeamA = currentRoundDeclaringTeam === "teamA";
     const teamAPlayers = predictingForTeamA ? ourTeamPlayers : oppTeamPlayers;
     const teamBPlayers = predictingForTeamA ? oppTeamPlayers : ourTeamPlayers;
@@ -627,10 +631,19 @@ function getPredictionAdvice(
     if (firstPreds.length === 0) return null;
     
     const likelyFirst = firstPreds[0].player;
-    const ourBestResponse = predictResponse(teamBPlayers, likelyFirst, context, usedTeamBIds);
-    if (ourBestResponse.length === 0) return null;
+    const bestResponse = predictResponse(teamBPlayers, likelyFirst, context, usedTeamBIds);
+    if (bestResponse.length === 0) return null;
     
-    const bestOur = ourBestResponse[0];
+    const bestResp = bestResponse[0];
+    
+    // Context-aware wording - determine who owns each predicted player
+    const isWeDeclaring = predictingForTeamA;
+    const leaderLabel = isWeDeclaring ? "If we put up" : "If opponent puts up";
+    
+    // The response player is from teamBPlayers - opposite of who declared
+    // If we declared first (isWeDeclaring=true), response is from opponent -> "Their response:"
+    // If opponent declared first (isWeDeclaring=false), response is from us -> "Our response:"
+    const responderLabel = isWeDeclaring ? "Their response:" : "Our response:";
     
     return (
       <div style={{ 
@@ -641,18 +654,18 @@ function getPredictionAdvice(
         border: "2px solid #10b981"
       }}>
         <div style={{ fontSize: 12, color: "#065f46", marginBottom: 4 }}>
-          💡 If they lead with <strong>{likelyFirst.name} (SL{likelyFirst.skill_level})</strong>:
+          💡 {leaderLabel} <strong>{likelyFirst.name} (SL{likelyFirst.skill_level})</strong>:
         </div>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#065f46" }}>
-          Our best response: {bestOur.player.name} (SL{bestOur.player.skill_level})
+          {responderLabel} {bestResp.player.name} (SL{bestResp.player.skill_level})
         </div>
         <div style={{ fontSize: 12, color: "#047857", marginTop: 4 }}>
-          {bestOur.reason}
+          {bestResp.reason}
         </div>
       </div>
     );
   } else {
-    // Response mode: they responded, show our next move
+    // Response mode: someone responded, show next move prediction
     if (!firstDeclaredPlayer) return null;
     
     const respondingIsTeamA = currentRoundDeclaringTeam !== "teamA";
@@ -680,6 +693,12 @@ function getPredictionAdvice(
     
     const bestNext = nextFirstPreds[0];
     
+    // Context-aware wording - determine who owns each predicted player
+    // If we responded (respondingIsTeamA=true), next lead is opponent's player -> "Their next lead:"
+    // If opponent responded (respondingIsTeamA=false), next lead is our player -> "Our next lead:"
+    const ifTheyRespondLabel = respondingIsTeamA ? "If opponent responds with" : "If we respond with";
+    const nextMoveLabel = respondingIsTeamA ? "Their next lead:" : "Our next lead:";
+    
     return (
       <div style={{ 
         marginTop: 16, 
@@ -689,10 +708,10 @@ function getPredictionAdvice(
         border: "2px solid #3b82f6"
       }}>
         <div style={{ fontSize: 12, color: "#1e40af", marginBottom: 4 }}>
-          💡 If they respond with <strong>{likelyResponse.name} (SL{likelyResponse.skill_level})</strong>:
+          💡 {ifTheyRespondLabel} <strong>{likelyResponse.name} (SL{likelyResponse.skill_level})</strong>:
         </div>
         <div style={{ fontSize: 14, fontWeight: 700, color: "#1d4ed8" }}>
-          Our next round best first: {bestNext.player.name} (SL{bestNext.player.skill_level})
+          {nextMoveLabel} {bestNext.player.name} (SL{bestNext.player.skill_level})
         </div>
         <div style={{ fontSize: 12, color: "#1e40af", marginTop: 4 }}>
           {bestNext.reason}
