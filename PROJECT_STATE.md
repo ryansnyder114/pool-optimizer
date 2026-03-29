@@ -168,3 +168,63 @@ Possible next moves:
 
 * Passive by-SL stats are separate from manually entered/imported player stats
 * Tracked by-SL stats currently update on round save and persist through explicit save action
+
+#### Captain Logic Map
+
+The recommendation engine is designed to behave like a practical team captain, not a black-box model.
+
+### Recommendation Priority
+
+1. **Lineup legality / future viability**
+
+   * Only consider players who keep valid lineup paths alive
+   * Never recommend a player that creates illegal or strategically broken future options
+
+2. **Core player strength**
+
+   * Use manual/imported stats as the main strength signal
+   * Includes win percentage, matches played, points per match, and percent points available
+
+3. **Match context**
+
+   * Adjust for live match situation
+   * Includes current score, declaration order, and strategic flexibility
+
+4. **Tracked by-SL matchup tendency**
+
+   * Use `tracked_vs_sl` as a small background modifier when opponent SL is known
+   * Positive history vs that SL gives a slight boost
+   * Negative history vs that SL gives a slight penalty
+   * Small samples should have very low influence
+   * This should act as a tiebreaker, not a primary decision-maker
+
+5. **Minor tie-breakers**
+
+   * Only used after the major recommendation layers above
+
+### Design Intent
+
+* Keep recommendations fast and captain-friendly
+* Avoid UI clutter
+* Avoid black-box behavior
+* Let matchup history improve decisions quietly over time
+* Never let tracked-by-SL data override legality, lineup preservation, or major strength differences
+
+## UI Cleanup: Collapsible Team Management
+
+Added collapsible sections for:
+- Saved Teams
+- Create Team
+
+Behavior:
+- Both sections can be manually expanded/collapsed
+- Both auto-collapse once when a real match begins
+- Users can manually reopen them during the match
+- Auto-collapse does not repeatedly fight user input
+- Collapse state resets when the match fully resets
+
+Implementation notes:
+- Uses local Dashboard.tsx state
+- Uses stable live rosters as the active-match trigger
+- Uses a ref guard so auto-collapse happens once per match session
+- No backend changes

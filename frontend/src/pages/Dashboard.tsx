@@ -266,6 +266,81 @@ function getScoreContextBadgeStyle(context: ScoreContext): { bg: string; color: 
   }
 }
 
+// ============ TRACKED MATCHUP ADJUSTMENT HELPER ============
+
+const TRACKED_SL_SCALE = 6; // Max influence range (6 points max adjustment)
+
+/**
+ * Get matchup adjustment based on tracked_vs_sl historical data.
+ * Returns a small score adjustment (-3 to +3 range) based on player's
+ * historical performance vs this specific opponent skill level.
+ */
+function getTrackedMatchupAdjustment(player: Player, oppSl: number): number {
+  const slKey = String(oppSl);
+  const tracked = player.tracked_vs_sl?.[slKey];
+  
+  // No data - no adjustment
+  if (!tracked || tracked.matches === 0) {
+    return 0;
+  }
+  
+  const matches = tracked.matches;
+  const winPct = (tracked.win_percentage ?? 0) / 100;
+  
+  // Compute edge from 50%
+  const edge = winPct - 0.5;
+  
+  // Apply confidence based on sample size
+  let confidence: number;
+  if (matches <= 2) {
+    confidence = 0.25;
+  } else if (matches <= 4) {
+    confidence = 0.6;
+  } else {
+    confidence = 1.0;
+  }
+  
+  // Optional: soft penalty for extreme win% with tiny samples
+  let samplePenalty = 1.0;
+  if (matches <= 2 && (winPct === 0 || winPct === 1)) {
+    samplePenalty = 0.5;
+  }
+  
+  // Calculate adjustment
+  const adjustment = edge * confidence * samplePenalty * TRACKED_SL_SCALE;
+  
+  // Clamp to safe range
+  return Math.max(-3, Math.min(3, adjustment));
+}
+
+/**
+ * Get a short explanation string for tracked matchup adjustment.
+ * Returns empty string if no meaningful data or adjustment.
+ */
+function getTrackedMatchupExplanation(player: Player, oppSl: number): string {
+  const slKey = String(oppSl);
+  const tracked = player.tracked_vs_sl?.[slKey];
+  
+  if (!tracked || tracked.matches === 0) {
+    return "";
+  }
+  
+  const matches = tracked.matches;
+  const winPct = tracked.win_percentage ?? 0;
+  const adjustment = getTrackedMatchupAdjustment(player, oppSl);
+  
+  // Only explain if adjustment meaningfully affects ranking (threshold ~0.5)
+  if (Math.abs(adjustment) < 0.5) {
+    return "";
+  }
+  
+  if (adjustment > 0) {
+    return `Strong historical results vs SL${oppSl}`;
+  } else {
+    return `Slightly weaker past results vs SL${oppSl}`;
+  }
+}
+
 // ============ STATS CONFIDENCE & WEIGHTING HELPERS ============
 
 // Determine confidence level based on sample size (matches played)
@@ -357,7 +432,8 @@ function predictFirstDeclaration(
   players: Player[],
   context: ScoreContext,
   usedPlayerIds: Set<string>,
-  isOurTeam: boolean
+  isOurTeam: boolean,
+  knownOppSl?: number // Optional: opponent SL when already declared (response mode)
 ): Prediction[] {
   // Filter available players
   const available = players.filter(p => !usedPlayerIds.has(p.id));
@@ -417,7 +493,19 @@ function predictFirstDeclaration(
     const statBonus = calculateStatBonus(p);
     score += statBonus.score;
     
-    return { player: p, score, reason, statReasons: statBonus.reasons };
+    // Tracked matchup adjustment - only apply if opponent SL is known (response mode)
+    let statReasonsWithMatchup = [...statBonus.reasons];
+    if (knownOppSl !== undefined) {
+      const trackedAdjustment = getTrackedMatchupAdjustment(p, knownOppSl);
+      score += trackedAdjustment;
+      
+      const trackedReason = getTrackedMatchupExplanation(p, knownOppSl);
+      if (trackedReason) {
+        statReasonsWithMatchup.push(trackedReason);
+      }
+    }
+    
+    return { player: p, score, reason, statReasons: statReasonsWithMatchup };
   });
   
   // Sort by score descending
@@ -491,7 +579,17 @@ function predictResponse(
     const statBonus = calculateStatBonus(p);
     score += statBonus.score;
     
-    return { player: p, score, reason, statReasons: statBonus.reasons };
+    // Tracked matchup adjustment (player has history vs this specific SL)
+    const trackedAdjustment = getTrackedMatchupAdjustment(p, firstSL);
+    score += trackedAdjustment;
+    
+    // Track if adjustment meaningfully influenced ranking
+    const trackedReason = getTrackedMatchupExplanation(p, firstSL);
+    const statReasonsWithMatchup = trackedReason 
+      ? [...statBonus.reasons, trackedReason]
+      : statBonus.reasons;
+    
+    return { player: p, score, reason, statReasons: statReasonsWithMatchup };
   });
   
   scored.sort((a, b) => b.score - a.score);
@@ -575,7 +673,8 @@ function getPredictionAdvice(
     const ourTeamForNext = respondingIsTeamA ? oppTeamPlayers : ourTeamPlayers;
     const usedOurForNext = respondingIsTeamA ? usedBPlayerIdSet : usedAPlayerIdSet;
     const nextContext = respondingIsTeamA ? teamAContext : teamBContext;
-    const nextFirstPreds = predictFirstDeclaration(ourTeamForNext, nextContext, usedOurForNext, !respondingIsTeamA);
+    // Pass known opponent SL (the responding player) for matchup adjustment
+    const nextFirstPreds = predictFirstDeclaration(ourTeamForNext, nextContext, usedOurForNext, !respondingIsTeamA, likelyResponse.skill_level);
     
     if (nextFirstPreds.length === 0) return null;
     
@@ -1218,6 +1317,12 @@ export default function Dashboard() {
   const [loadingTeams, setLoadingTeams] = useState(false);
   const [teamError, setTeamError] = useState("");
 
+  // Collapse state for team management sections
+  const [showSavedTeams, setShowSavedTeams] = useState(true);
+  const [showCreateTeam, setShowCreateTeam] = useState(true);
+  // Guard to auto-collapse only once per match session
+  const hasAutoCollapsedRef = React.useRef(false);
+
   const [editingTeam, setEditingTeam] = useState<Team>(emptyTeam());
   const [isEditingExisting, setIsEditingExisting] = useState(false);
 
@@ -1470,6 +1575,27 @@ export default function Dashboard() {
   useEffect(() => {
     loadTeams();
   }, []);
+
+  // Auto-collapse team sections when entering active match mode
+  useEffect(() => {
+    const hasLiveRoster = stableOurTeamPlayers.length > 0 && stableOppTeamPlayers.length > 0;
+    const matchActive = hasLiveRoster;
+    
+    // Only auto-collapse once when transitioning into active match
+    if (matchActive && !hasAutoCollapsedRef.current) {
+      hasAutoCollapsedRef.current = true;
+      setShowSavedTeams(false);
+      setShowCreateTeam(false);
+    }
+    
+    // Reset the guard when match fully resets (both rosters cleared)
+    if (!hasLiveRoster && hasAutoCollapsedRef.current) {
+      hasAutoCollapsedRef.current = false;
+      // Optionally restore defaults on reset
+      setShowSavedTeams(true);
+      setShowCreateTeam(true);
+    }
+  }, [stableOurTeamPlayers.length, stableOppTeamPlayers.length]);
 
   async function refreshLegalPlayers(nextState: MatchState) {
     const res = await getLegalPlayers(nextState);
@@ -1868,14 +1994,24 @@ export default function Dashboard() {
             padding: 16,
           }}
         >
-          <h2>Saved Teams</h2>
-          <button onClick={loadTeams} disabled={loadingTeams || busy}>
-            Refresh Teams
-          </button>
-          {teamError && <p style={{ color: "red" }}>{teamError}</p>}
+          {/* Collapsible header */}
+          <div 
+            onClick={() => setShowSavedTeams(!showSavedTeams)}
+            style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, userSelect: "none" }}
+          >
+            <span style={{ fontSize: 12, color: "#6b7280" }}>{showSavedTeams ? "▼" : "▶"}</span>
+            <h2 style={{ margin: 0 }}>Saved Teams</h2>
+          </div>
+          
+          {showSavedTeams ? (
+            <>
+              <button onClick={loadTeams} disabled={loadingTeams || busy}>
+                Refresh Teams
+              </button>
+              {teamError && <p style={{ color: "red" }}>{teamError}</p>}
 
-          <div style={{ marginTop: 12 }}>
-            {teams.length === 0 ? (
+              <div style={{ marginTop: 12 }}>
+                {teams.length === 0 ? (
               <p>No saved teams yet.</p>
             ) : (
               teams.map((team) => (
@@ -1914,6 +2050,8 @@ export default function Dashboard() {
               ))
             )}
           </div>
+          </>
+          ) : null}
         </section>
 
         <section
@@ -1923,21 +2061,30 @@ export default function Dashboard() {
             padding: 16,
           }}
         >
-          <h2>{isEditingExisting ? "Edit Team" : "Create Team"}</h2>
+          {/* Collapsible header */}
+          <div 
+            onClick={() => setShowCreateTeam(!showCreateTeam)}
+            style={{ cursor: "pointer", display: "flex", alignItems: "center", gap: 8, userSelect: "none" }}
+          >
+            <span style={{ fontSize: 12, color: "#6b7280" }}>{showCreateTeam ? "▼" : "▶"}</span>
+            <h2 style={{ margin: 0 }}>{isEditingExisting ? "Edit Team" : "Create Team"}</h2>
+          </div>
 
-          <label style={{ display: "block", marginBottom: 8 }}>
-            Team ID
-            <input
-              style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
-              value={editingTeam.id}
-              onChange={(e) =>
-                setEditingTeam((prev) => ({ ...prev, id: e.target.value }))
-              }
-              placeholder="team_alpha"
-            />
-          </label>
+          {showCreateTeam ? (
+            <>
+              <label style={{ display: "block", marginBottom: 8 }}>
+                Team ID
+                <input
+                  style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
+                  value={editingTeam.id}
+                  onChange={(e) =>
+                    setEditingTeam((prev) => ({ ...prev, id: e.target.value }))
+                  }
+                  placeholder="team_alpha"
+                />
+              </label>
 
-          <label style={{ display: "block", marginBottom: 12 }}>
+              <label style={{ display: "block", marginBottom: 12 }}>
             Team Name
             <input
               style={{ display: "block", width: "100%", padding: 8, marginTop: 4 }}
@@ -2146,6 +2293,8 @@ export default function Dashboard() {
               Reset
             </button>
           </div>
+          </>
+          ) : null}
         </section>
       </div>
 
