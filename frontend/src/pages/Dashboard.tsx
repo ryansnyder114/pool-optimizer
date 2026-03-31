@@ -1510,6 +1510,161 @@ function getStepStyle(step: LiveStep, currentStep: LiveStep): { bg: string; colo
 
 const STEP_ORDER: LiveStep[] = ["select_players", "lock_matchup", "enter_score", "save_round", "next_round"];
 
+// ============ EXPORT/IMPORT TYPES ============
+
+const EXPORT_VERSION = 1;
+const EXPORT_STORAGE_KEY = "pool_optimizer_export";
+
+type ExportPayload = {
+  version: number;
+  exportedAt: string;
+  data: {
+    teams: Team[];
+  };
+};
+
+// Export app data to downloadable JSON file
+async function handleExportData(setStatus: (s: string) => void, setBusy: (b: boolean) => void): Promise<void> {
+  setBusy(true);
+  setStatus("Exporting data...");
+  
+  try {
+    // Fetch current teams from backend
+    const response = await fetch(`${API_BASE}/teams`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch teams: ${response.status}`);
+    }
+    const data = await response.json();
+    const teams = data.teams ?? data;
+    
+    // Build export payload
+    const payload: ExportPayload = {
+      version: EXPORT_VERSION,
+      exportedAt: new Date().toISOString(),
+      data: { teams },
+    };
+    
+    // Create and trigger download
+    const jsonStr = JSON.stringify(payload, null, 2);
+    const blob = new Blob([jsonStr], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    
+    const today = new Date().toISOString().split("T")[0];
+    const filename = `pool-optimizer-export-${today}.json`;
+    
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    setStatus(`Exported ${teams.length} teams to ${filename}`);
+  } catch (err: any) {
+    console.error("Export failed:", err);
+    setStatus(`Export failed: ${err.message}`);
+    alert(`Export failed: ${err.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
+// Import app data from JSON file (replace mode)
+async function handleImportData(
+  file: File,
+  setStatus: (s: string) => void,
+  setBusy: (b: boolean) => void,
+  onSuccess: () => void
+): Promise<void> {
+  setBusy(true);
+  setStatus("Importing data...");
+  
+  try {
+    // Parse JSON file
+    const text = await file.text();
+    let payload: ExportPayload;
+    
+    try {
+      payload = JSON.parse(text);
+    } catch {
+      throw new Error("Invalid JSON file");
+    }
+    
+    // Validate payload structure
+    if (!payload || typeof payload !== "object") {
+      throw new Error("Invalid file format: not an object");
+    }
+    
+    if (payload.version !== EXPORT_VERSION) {
+      throw new Error(`Unsupported export version: ${payload.version}. Expected ${EXPORT_VERSION}`);
+    }
+    
+    if (!payload.data || !Array.isArray(payload.data.teams)) {
+      throw new Error("Invalid file format: missing teams array");
+    }
+    
+    const teams = payload.data.teams;
+    
+    if (teams.length === 0) {
+      throw new Error("Export file contains no teams");
+    }
+    
+    // Validate each team has required fields
+    for (const team of teams) {
+      if (!team.id || !team.name || !Array.isArray(team.players)) {
+        throw new Error(`Invalid team data: missing required fields`);
+      }
+      for (const player of team.players) {
+        if (!player.id || !player.name) {
+          throw new Error(`Invalid player data in team ${team.name}`);
+        }
+      }
+    }
+    
+    // Fetch existing teams to get current list
+    const getResp = await fetch(`${API_BASE}/teams`);
+    if (!getResp.ok) {
+      throw new Error("Failed to fetch current teams");
+    }
+    const existingData = await getResp.json();
+    const existingTeams = existingData.teams ?? existingData;
+    
+    // Delete existing teams (replace mode)
+    for (const team of existingTeams) {
+      try {
+        await fetch(`${API_BASE}/teams/${team.id}`, { method: "DELETE" });
+      } catch (e) {
+        console.warn(`Failed to delete team ${team.id}:`, e);
+      }
+    }
+    
+    // Create imported teams
+    let importedCount = 0;
+    for (const team of teams) {
+      try {
+        await fetch(`${API_BASE}/teams`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(team),
+        });
+        importedCount++;
+      } catch (e) {
+        console.warn(`Failed to import team ${team.name}:`, e);
+      }
+    }
+    
+    setStatus(`Imported ${importedCount} teams (replaced all data)`);
+    onSuccess(); // Refresh the UI
+  } catch (err: any) {
+    console.error("Import failed:", err);
+    setStatus(`Import failed: ${err.message}`);
+    alert(`Import failed: ${err.message}`);
+  } finally {
+    setBusy(false);
+  }
+}
+
 // ============ MAIN DASHBOARD COMPONENT ============
 
 export default function Dashboard() {
@@ -2393,9 +2548,47 @@ export default function Dashboard() {
           
           {showSavedTeams ? (
             <>
-              <button onClick={loadTeams} disabled={loadingTeams || busy}>
-                Refresh Teams
-              </button>
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                <button onClick={loadTeams} disabled={loadingTeams || busy}>
+                  Refresh Teams
+                </button>
+                <button 
+                  onClick={() => handleExportData(setStatus, setBusy)}
+                  disabled={busy || teams.length === 0}
+                  style={{ background: "#7c3aed", color: "#fff" }}
+                  title="Export all teams and player stats to a JSON file"
+                >
+                  📤 Export Data
+                </button>
+                <label
+                  style={{
+                    padding: "8px 12px",
+                    background: busy ? "#9ca3af" : "#059669",
+                    color: "#fff",
+                    borderRadius: 6,
+                    cursor: busy ? "not-allowed" : "pointer",
+                    fontSize: 14,
+                    fontWeight: 500,
+                    border: "none",
+                  }}
+                >
+                  📥 Import Data
+                  <input
+                    type="file"
+                    accept=".json"
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (!file) return;
+                      if (!window.confirm("⚠️ Importing will replace ALL current team data.\n\nMake sure to export first if you want a backup!\n\nContinue?")) {
+                        return;
+                      }
+                      handleImportData(file, setStatus, setBusy, loadTeams);
+                    }}
+                    disabled={busy}
+                    style={{ display: "none" }}
+                  />
+                </label>
+              </div>
               {teamError && <p style={{ color: "red" }}>{teamError}</p>}
 
               <div style={{ marginTop: 12 }}>

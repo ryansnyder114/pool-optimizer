@@ -503,3 +503,68 @@ Recovery data is cleared when:
 * reduce risk during real match use
 * keep implementation lightweight and frontend-driven
 * preserve existing recommendation, scoring, and match-flow behavior
+
+## Data Portability: Export / Import App Data
+
+Added Export / Import functionality so app data can be moved between devices without relying on Git.
+
+### Purpose
+
+* Keep team/player data consistent between Mac mini and Windows laptop
+* Share tracked matchup history used by prediction logic
+* Make the laptop a practical live-use device while preserving data portability
+
+### Export Payload
+
+Exports a JSON snapshot with structure:
+
+```ts
+{
+  version: 1,
+  exportedAt: <timestamp>,
+  data: {
+    teams: [...]
+  }
+}
+```
+
+### Included Data
+
+Export/import includes:
+
+* all teams
+* all players
+* manual/imported player stats
+* `tracked_vs_sl` matchup history by opponent skill level
+
+This ensures prediction/recommendation logic stays aligned across devices.
+
+### Import Behavior
+
+* Import validates payload version and basic shape
+* Import warns that current saved team data will be replaced
+* v1 uses **replace mode**, not merge mode
+* Existing teams are removed, then imported teams are recreated
+* UI refreshes immediately after successful import
+
+### Prediction Impact
+
+Imported `tracked_vs_sl` data becomes immediately available to:
+
+* `predictFirstDeclaration`
+* `predictResponse`
+* `getTrackedMatchupAdjustment()`
+
+No restart required after import.
+
+### Design Intent
+
+* Keep data sharing simple and reliable
+* Avoid Git-based syncing for live match data
+* Avoid duplicate/conflicting team merges in v1
+* Preserve prediction consistency across devices
+
+### Note
+
+This v1 shares the accumulated tracked matchup data used by predictions. If full raw match-history analytics are needed later, export/import may need to include raw round history as well.
+
